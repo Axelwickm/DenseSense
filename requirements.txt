@@ -1,0 +1,4 @@
+colormath
+numpy
+opencv-python
+scipy
