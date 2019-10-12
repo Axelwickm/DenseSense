@@ -1,12 +1,16 @@
 import cv2
 import numpy as np
 
+import DenseSense.algorithms.Algorithm
 
-class People_Tracker(Algorithm):
+
+class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
     trackedObjects = []
     seenPeople = 0
     frame = 0
     lastFrameTime = 0
+
+
     def __init__(self):
         Algorithm.__init__(self, "tracker")
         self.lastFrameTime = time.time()

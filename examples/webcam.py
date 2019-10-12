@@ -9,7 +9,9 @@ import cv2
 import numpy as np
 
 import DenseSense
-import DenseSense.algorithms.PeopleExtractor
+from DenseSense.algorithms.densepose import DenseposeExtractor
+from DenseSense.algorithms.people_extractor import PeopleExtractor
+from DenseSense.algorithms.people_tracker import People_Tracker
 
 
 def white_balance(image):
@@ -24,19 +26,35 @@ def white_balance(image):
 
 def main():
     cam = cv2.VideoCapture(0)
+
+    dp = DenseposeExtractor()
+    pe = PeopleExtractor()
+    pt = People_Tracker()
+
     while True:
         # Get image from webcam
         return_value, image = cam.read()
-        image = np.zeros((200, 300, 3), np.uint8)
-        cv2.imshow("input image", image)
 
         # White balance the image to get better color features
+        image = white_balance(image)
 
+        # Send image to Densepose
+        boxes, bodys = dp.extract(image)
+
+        # Extact the people
+        people, mergedIUVs = pe.extract(boxes, bodys, image)
+
+        # Track the people (which modifies the people variables)
+        pt.extract(people)
+
+        # Show image
+        cv2.imshow("input image", image)
 
         # Quit on escape
         if cv2.waitKey(1) == 27:
             break
     cv2.destroyAllWindows()
+
 
 if __name__ == '__main__':
     main()

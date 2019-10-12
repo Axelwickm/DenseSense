@@ -1,5 +1,5 @@
 # Import caffe2 and Detectron
-from numpy import np
+import numpy as np
 
 from caffe2.python import workspace
 
@@ -11,7 +11,7 @@ from detectron.core.config import (assert_and_infer_cfg, cfg, merge_cfg_from_fil
 from detectron.utils.io import cache_url
 from detectron.utils.logging import setup_logging
 
-import .Algorithm
+import DenseSense.algorithms.Algorithm
 
 # Configure caffe2
 
@@ -28,7 +28,7 @@ assert_and_infer_cfg(cache_urls=False)
 model = infer_engine.initialize_model_from_cfg("/shared/DensePose_ResNet50_FPN_s1x-e2e.pkl")
 
 
-class DenseposeExtractor(Algorithm):
+class DenseposeExtractor(DenseSense.algorithms.Algorithm.Algorithm):
 
     def __init__(self):
         return

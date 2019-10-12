@@ -4,10 +4,10 @@ import numpy as np
 import DenseSense.algorithms.Algorithm
 
 
-class PeopleExtractor(DenseSense.algorithms.Algorithm):
+class PeopleExtractor(DenseSense.algorithms.Algorithm.Algorithm):
     assigments = np.empty(0)
 
-    def __init__(self, db = None):
+    def __init__(self, db=None):
         return
     
     def extract(self, boxes, bodys, image, training=False): # TODO: make training a member variable
