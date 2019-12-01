@@ -1,4 +1,4 @@
-# Import caffe2 and Detectron
+import numpy as np
 import torch
 
 from detectron2.config import get_cfg
@@ -6,9 +6,11 @@ from detectron2.engine.defaults import DefaultPredictor
 
 from densepose import add_densepose_config
 
-import DenseSense.algorithms.Algorithm
+from DenseSense.algorithms.Algorithm import Algorithm
+from DenseSense.Person import Person
 
 
+# TODO: set these paths outside this file
 config_fpath = "./models/densepose_rcnn_R_50_FPN_s1x.yaml"
 model_fpath = "./models/R_50_FPN_s1x.pkl"
 
@@ -20,7 +22,7 @@ cfg.MODEL.WEIGHTS = model_fpath
 cfg.MODEL.DEVICE = "cpu"
 cfg.freeze()
 
-class DenseposeExtractor(DenseSense.algorithms.Algorithm.Algorithm):
+class DenseposeExtractor(Algorithm):
 
     def __init__(self):
         self.predictor = DefaultPredictor(cfg)
@@ -29,10 +31,20 @@ class DenseposeExtractor(DenseSense.algorithms.Algorithm.Algorithm):
     def extract(self, image):
         with torch.no_grad():
             ret = self.predictor(image)["instances"].to("cpu")
-            boxes = ret.get("pred_boxes")
-            bodies = ret.get("pred_densepose")
 
-        return tuple([boxes, bodies])
+        boxes = ret.get("pred_boxes")
+        bodies = ret.get("pred_densepose")
+        mergedIUVs = np.zeros((4, image.shape[0], image.shape[1]), dtype=np.float)
+
+        sorted_inds = np.argsort(boxes.area)
+
+        people = []
+        for i in sorted_inds:
+            bounds = boxes.tensor[i]
+            people.append(Person(bounds, bodies.S[i], bodies.I[i], bodies.U[i], bodies.V[i]))
+
+
+        return people
     
     def train(self, saveModel):
         raise Exception("Densepose algorithm cannot be trained from within DenseSense")
