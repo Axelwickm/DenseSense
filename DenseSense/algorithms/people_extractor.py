@@ -10,7 +10,7 @@ class PeopleExtractor(DenseSense.algorithms.Algorithm.Algorithm):
     def __init__(self, db=None):
         return
     
-    def extract(self, boxes, bodys, image, training=False): # TODO: make training a member variable
+    def extract(self, boxes, bodies, image, training=False): # TODO: make training a member variable
         # Merge into one inds
         mergedIUVs = np.zeros((3, image.shape[0], image.shape[1]), dtype=np.float)
         if boxes.shape[0] == 0:
@@ -20,7 +20,7 @@ class PeopleExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         sorted_inds = np.argsort(areas) 
         for i in sorted_inds:
             bbox = boxes[i, :4]
-            IUVs = bodys[i]
+            IUVs = bodies[i]
             x1 = int(bbox[0])
             x2 = int(bbox[0] + IUVs.shape[2])
             y1 = int(bbox[1])

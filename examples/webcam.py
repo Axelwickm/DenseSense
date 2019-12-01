@@ -39,10 +39,10 @@ def main():
         image = white_balance(image)
 
         # Send image to Densepose
-        boxes, bodys = dp.extract(image)
+        boxes, bodies = dp.extract(image)
 
         # Extact the people
-        #people, mergedIUVs = pe.extract(boxes, bodys, image)
+        people, mergedIUVs = pe.extract(boxes, bodies, image)
 
         # Track the people (which modifies the people variables)
         #pt.extract(people)

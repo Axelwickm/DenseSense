@@ -129,8 +129,8 @@ class PoseDetectorServer():
             try:
                 image = white_balance(image)
 
-                boxes, bodys = self.DP.extract(image)
-                people, mergedIUVs = self.PE.extract(boxes, bodys, image)
+                boxes, bodies = self.DP.extract(image)
+                people, mergedIUVs = self.PE.extract(boxes, bodies, image)
                 self.PT.extract(people)
                 
                 UVs = self.UV.extract(people, mergedIUVs, image)
@@ -406,8 +406,8 @@ class PoseDetectorServer():
                             if self.PE is None:
                                 self.PE = Algorithms.People_Extractor("/shared/bodyMetrics.json")
                             image = db.getData("modanetImages", key)
-                            boxes, bodys = db.getData("densepose", key)
-                            data = self.PE(boxes, bodys, image)
+                            boxes, bodies = db.getData("densepose", key)
+                            data = self.PE(boxes, bodies, image)
                             return data
                         
                         def genUV_Textures(key):
@@ -417,8 +417,8 @@ class PoseDetectorServer():
                                 self.UV = Algorithms.UV_Extractor()
                             image = db.getData("modanetImages", key)
                             image = white_balance(image)
-                            boxes, bodys = db.getData("densepose", key)
-                            people, mergedIUVs = self.PE.extract(boxes, bodys, image)
+                            boxes, bodies = db.getData("densepose", key)
+                            people, mergedIUVs = self.PE.extract(boxes, bodies, image)
                             data = self.UV.extract(people, mergedIUVs, image, 64) # This 64 is prob suppose to be set by algortihm, but oh well
                             db.saveData("UV_Textures", key, data, "ndarray")
                             return data

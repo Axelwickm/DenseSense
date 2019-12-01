@@ -30,9 +30,9 @@ class DenseposeExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         with torch.no_grad():
             ret = self.predictor(image)["instances"].to("cpu")
             boxes = ret.get("pred_boxes")
-            bodys = ret.get("pred_densepose")
+            bodies = ret.get("pred_densepose")
 
-        return tuple([boxes, bodys])
+        return tuple([boxes, bodies])
     
     def train(self, saveModel):
         raise Exception("Densepose algorithm cannot be trained from within DenseSense")
