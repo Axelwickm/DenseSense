@@ -1,4 +1,11 @@
+opencv-python
+opencv-contrib-python
 colormath
 numpy
-opencv-python
+scipy
+pafy
+ffmpeg
+torch
+future
+pycocotools
 scipy
