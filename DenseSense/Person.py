@@ -3,8 +3,10 @@ class Person(object):
     incremental = 0
 
     def __init__(self, bounds, S, I, U, V):
-        self.id = incremental
-        incremental += 1
+        self.id = Person.incremental
+        Person.incremental += 1
+
+        self.attrs = {}
 
         self.bounds = bounds
         self.S = S
@@ -15,4 +17,3 @@ class Person(object):
     def become(self, otherInstance):
         self.incremental = otherInstance.incremental
         return self
-

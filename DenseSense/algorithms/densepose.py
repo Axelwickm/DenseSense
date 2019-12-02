@@ -34,12 +34,9 @@ class DenseposeExtractor(Algorithm):
 
         boxes = ret.get("pred_boxes")
         bodies = ret.get("pred_densepose")
-        mergedIUVs = np.zeros((4, image.shape[0], image.shape[1]), dtype=np.float)
-
-        sorted_inds = np.argsort(boxes.area)
 
         people = []
-        for i in sorted_inds:
+        for i in range(len(boxes)):
             bounds = boxes.tensor[i]
             people.append(Person(bounds, bodies.S[i], bodies.I[i], bodies.U[i], bodies.V[i]))
 
