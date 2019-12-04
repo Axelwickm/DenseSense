@@ -41,9 +41,12 @@ def main():
 
         # Send image to Densepose
         people = dp.extract(image)
+        print("len", len(people))
 
         # Track the people (which modifies the people variables)
-        #pt.extract(people)
+        pt.extract(people)
+
+        print("len after", len(people))
 
         # Extact UV map for each person
         #uvs = uv.extract(people, mergedIUVs, image)

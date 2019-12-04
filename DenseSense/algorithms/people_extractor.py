@@ -1,4 +1,5 @@
 
+import cv2
 import numpy as np
 
 import DenseSense.algorithms.Algorithm
@@ -11,16 +12,14 @@ class PeopleExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         return
     
     def extract(self, boxes, bodies, image, training=False): # TODO: make training a member variable
-        # Merge into one inds
-        mergedIUVs = np.zeros((3, image.shape[0], image.shape[1]), dtype=np.float)
-        if boxes.shape[0] == 0:
+        if len(boxes) == 0:
             return [], mergedIUVs
 
-        areas = (boxes[:, 2] - boxes[:, 0]) * (boxes[:, 3] - boxes[:, 1])
-        sorted_inds = np.argsort(areas) 
-        for i in sorted_inds:
-            bbox = boxes[i, :4]
-            IUVs = bodies[i]
+        sorted_inds = np.argsort(boxes.area)
+
+        for ind in sorted_inds:
+            bbox = boxes.tensor[ind]
+            IUVs = bodies[ind]
             x1 = int(bbox[0])
             x2 = int(bbox[0] + IUVs.shape[2])
             y1 = int(bbox[1])
@@ -192,7 +191,6 @@ class PeopleExtractor(DenseSense.algorithms.Algorithm.Algorithm):
             #self.debugOutput[j] = centers[self.assigments == i]
             j += 1
 
-        #print(people)
         return people, mergedIUVs
 
     def train(self, saveModel):

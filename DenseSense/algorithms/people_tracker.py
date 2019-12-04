@@ -3,6 +3,7 @@ import numpy as np
 import time
 
 import DenseSense.algorithms.Algorithm
+from collections import deque
 
 
 class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
@@ -27,7 +28,7 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
         deltaTime = self.lastFrameTime - nowTime
         self.lastFrameTime = nowTime
 
-        # Make sure every person's original index is remebered
+        # Make sure every person's original index is remembered
         for i in range(len(people)):
             people[i].attrs["originalIndex"] = i
 
@@ -53,10 +54,9 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
                     continue
             i += 1
 
-        self._updateExistingPeople(people, status)
+        self._updateExistingPeople(people, status, deltaTime)
 
         self._changeStates(people, associations)
-
 
     def _match(self, person, associations):
         # Convert to center and dim coords
@@ -91,32 +91,34 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
     def _updateExistingPeople(self, people, status, deltaTime):
         for i in range(len(people)):
             person = people[i]
-            bounds = person["bounds"]
+            bounds = person.bounds
             dims = np.array([bounds[2] - bounds[0], bounds[3] - bounds[1]])
             center = np.array([bounds[0] + dims[0] / 2, bounds[1] + dims[1] / 2])
 
             if status[i] == -1: # If this is a new person
                 # Construct a kalman filter
-                t = cv2.CV_64F
+                t = cv2.CV_32F
                 # FIXME: kalman magic number should be stored
                 s = 6  # x, y, vx, vy, wx, w, h
                 m = 4  # x, y, w, h
                 kalman = cv2.KalmanFilter(s, m, 0, type=t)
 
-                kalman.transitionMatrix = np.eye(s)
-                kalman.measurementMatrix = np.zeros((m, s))
+                kalman.transitionMatrix = np.eye(s, dtype=np.float32)
+                kalman.measurementMatrix = np.zeros((m, s), dtype=np.float32)
                 kalman.measurementMatrix[0, 0] = 1
                 kalman.measurementMatrix[1, 1] = 1
                 kalman.measurementMatrix[2, 4] = 1
                 kalman.measurementMatrix[3, 5] = 1
 
-                kalman.processNoiseCov = 1e-2 * np.eye(s)
+                kalman.processNoiseCov = 1e-2 * np.eye(s, dtype=np.float32)
                 kalman.processNoiseCov[2, 2] = 5
                 kalman.processNoiseCov[3, 3] = 5
 
-                kalman.measurementNoiseCov = 1e-1 * np.eye(m)
+                kalman.measurementNoiseCov = 1e-1 * np.eye(m, dtype=np.float32)
 
-                kalman.statePre = np.array([center[0], center[1], 0, 0, dims[0], dims[1]], np.float)
+                kalman.controlMatrix = np.array(kalman.controlMatrix, dtype=np.float32)
+
+                kalman.statePre = np.array([center[0], center[1], 0, 0, dims[0], dims[1]], dtype=np.float32)
 
                 person.attrs["track"] = {
                     "lastSeenFrame" : self.frame,
@@ -130,7 +132,7 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
 
             else: # Else, update this persons attributes
                 ind = status[i]
-                person = person.become(self.oldPeople[ind])
+                person = self.oldPeople[ind].become(person)
                 people[i] = person
                 self.oldPeople[ind] = person
                 person.attrs["track"]["lastSeenFrame"] = self.frame
@@ -138,7 +140,7 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
                 person.attrs["track"]["history"].append(1)
                 person.attrs["track"]["kalman"].transitionMatrix[0, 2] = deltaTime*0.4
                 person.attrs["track"]["kalman"].transitionMatrix[1, 3] = deltaTime*0.4
-                person.attrs["track"]["kalman"].correct(np.concatenate([center, dims]))
+                person.attrs["track"]["kalman"].correct(np.array(np.concatenate([center, dims]), dtype=np.float32))
                 person.attrs["track"]["kalmanPrediction"] = person.attrs["track"]["kalman"].predict()
 
     def _changeStates(self, people, associations):
@@ -146,7 +148,8 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
         i = 0
         # Dynamically for every person
         while i < len(self.oldPeople):
-            track = people[i].attrs["track"]
+            track = self.oldPeople[i].attrs["track"]
+
             # Add to history for all people who didn't show up this frame
             if i < len(associations):
                 if associations[i][0] == -1:
@@ -163,14 +166,14 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
                 track["isVisible"] = True  # The person is seen, and should keep being visible
                 print("visible")
             else:
-                track["isVisible"] = False # The person should not be seen
-                if track["lastSeenFrame"] == self.frame: # Suppress if he/she is
-                    print("suppress")
-                    toRemove.append(people[i].attrs["originalIndex"])
+                track["isVisible"] = False                # The person should not be seen
+                if track["lastSeenFrame"] == self.frame:  # Suppress if he/she is
+                    print("suppress", self.oldPeople[i].attrs["originalIndex"])
+                    toRemove.append(self.oldPeople[i].attrs["originalIndex"])
 
             if persistence < self.delete:
                 print("forget")
-                del self.oldPeople[i] # Deleting from tracked objects
+                del self.oldPeople[i]  # Deleting from tracked objects
                 continue
 
             # If shouldn't be removed and not seen, then hallucinate the person
@@ -180,10 +183,10 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
 
             i += 1
 
-
         for index in sorted(toRemove, reverse=True):
             del people[index]
 
+        return
 
         # Debug stuff
         ghostBounds = []
@@ -194,12 +197,12 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
                                 np.squeeze(person.attrs["track"]["kalmanPrediciton"][:2]),
                                     person.attrs["track"]["isVisible"]))
             if not person.attrs["track"]["isVisible"]:
-                ghostBounds.append(person["bounds"])
+                ghostBounds.append(person.bounds)
             elif person.attrs["track"]["isVisible"] and person.attrs["track"]["lastSeenFrame"] != self.frame:
                 keptAliveIndex.append(person.id)
 
         self.debugOutput = (
-            np.array(ghostBounds),
+            ghostBounds,
             keptAliveIndex,
             predictions
         )

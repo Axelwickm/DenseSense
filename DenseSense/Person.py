@@ -16,4 +16,5 @@ class Person(object):
 
     def become(self, otherInstance):
         self.incremental = otherInstance.incremental
+        self.attrs.update(otherInstance.attrs)
         return self
