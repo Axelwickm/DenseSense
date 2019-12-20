@@ -11,6 +11,7 @@ import numpy as np
 from DenseSense.algorithms.densepose import DenseposeExtractor
 from DenseSense.algorithms.people_extractor import PeopleExtractor
 from DenseSense.algorithms.people_tracker import People_Tracker
+from DenseSense.utils.DebugRenderer import DebugRenderer
 #from DenseSense.algorithms.uv_extractor import UV_Extractor
 
 
@@ -31,6 +32,7 @@ def main():
     #pe = PeopleExtractor()
     pt = People_Tracker()
     #uv =  UV_Extractor()
+    dr = DebugRenderer()
 
     while True:
         # Get image from webcam
@@ -44,19 +46,40 @@ def main():
         print("len", len(people))
 
         # Track the people (which modifies the people variables)
-        pt.extract(people)
+        #pt.extract(people, True)
 
         print("len after", len(people))
 
         # Extact UV map for each person
         #uvs = uv.extract(people, mergedIUVs, image)
 
+
+        for person in people:
+            break
+            """
+            for i in range(0, 25):
+                gray = person.I[i].numpy()
+                gray[gray < 0.0] = 0
+                gray = cv2.normalize(gray, None, 255, 0, cv2.NORM_MINMAX, cv2.CV_8UC1)
+                gray = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+                cv2.imshow(str(i), gray)"""
+            if cv2.waitKey(0) == 27:
+                continue
+        #return
+
+
+
         # Show image
+        dr.setQueue([dp])
+        debugImage = dr.render(image, people)
+
         cv2.imshow("input image", image)
+        cv2.imshow("debug image", debugImage)
 
         # Quit on escape
         if cv2.waitKey(1) == 27:
             break
+
     cv2.destroyAllWindows()
 
 

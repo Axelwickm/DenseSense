@@ -7,7 +7,7 @@ from scipy.spatial import qhull
 class UV_Extractor(Algorithm):
     
     def __init__(self, db = None):
-        return
+        super().__init__()
     
     def extract(self, people, mergedIUVs, image, threshold=100):
         resolution = 64

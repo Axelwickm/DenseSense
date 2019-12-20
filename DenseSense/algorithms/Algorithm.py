@@ -1,9 +1,13 @@
 # Algorithm
 class Algorithm(): # Abstract class
-    debugOutput = None
+    def __init__(self):
+        pass
 
-    def extract():
-        pass # To be overridden
+    def extract(self):
+        pass  # To be overridden
 
-    def train():
-        pass # To be overridden
+    def train(self):
+        pass  # To be overridden
+
+    def renderDebug(self):
+        pass  # To be overridden

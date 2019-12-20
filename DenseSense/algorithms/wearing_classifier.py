@@ -141,6 +141,7 @@ class DescriptionExtractor(Algorithm):
 
     def __init__(self, model=None, db = None):
         print("Initiating DescriptionExtractor")
+        super().__init__()
 
         self.modelFile = model
         # Init classifier

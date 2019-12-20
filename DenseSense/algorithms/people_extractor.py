@@ -9,7 +9,7 @@ class PeopleExtractor(DenseSense.algorithms.Algorithm.Algorithm):
     assigments = np.empty(0)
 
     def __init__(self, db=None):
-        return
+        super().__init__()
     
     def extract(self, boxes, bodies, image, training=False): # TODO: make training a member variable
         if len(boxes) == 0:
