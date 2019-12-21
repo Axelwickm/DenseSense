@@ -38,16 +38,26 @@ class DenseposeExtractor(Algorithm):
 
         people = []
         for i in range(len(boxes)):
-            bounds = boxes.tensor[i].numpy()
+            # Create new person
             person = Person()
-            person.bounds = bounds
-            person.S = bodies.S[i]
-            person.I = bodies.I[i]
-            person.U = bodies.U[i]
-            person.V = bodies.V[i]
+            person.bounds = boxes.tensor[i].numpy()
 
-            person.S_ind = person.S.argmax(dim=0).cpu().numpy()  # Most activated segment (0 is background)
-            person.I_ind = person.I.argmax(dim=0).cpu().numpy() * (person.S_ind > 0)  # Most activated body part
+            S = bodies.S[i]
+            I = bodies.I[i]
+
+            # Merge S and I
+            person.S = S.argmax(dim=0).cpu().numpy()         # Most activated segment (0 is background)
+            mask = (person.S > 0)
+            person.I = I.argmax(dim=0).cpu().numpy() * mask  # Most activated body part
+
+            # Merge U and V
+            Un = bodies.U[i].cpu().numpy().astype(np.float32)
+            person.U = np.zeros(person.S.shape, dtype=np.float32)
+            Vn = bodies.U[i].cpu().numpy().astype(np.float32)
+            person.V = np.zeros(person.S.shape, dtype=np.float32)
+            for partId in range(Un.shape[0]):
+                person.U[person.I == partId] = Un[partId][person.I == partId].clip(0, 1)
+                person.V[person.I == partId] = Vn[partId][person.I == partId].clip(0, 1)
 
             people.append(person)
 
@@ -64,41 +74,31 @@ class DenseposeExtractor(Algorithm):
             bnds = person.bounds.astype(np.uint32)
             image = cv2.rectangle(image, (bnds[0], bnds[1]),
                                          (bnds[2], bnds[3]),
-                                         (100, 100, 100), 1)
-            # Get color of bodyparts using cv2 color map
-            matrix = (person.I_ind*(255/25)).astype(np.uint8)
+                                         (100, 100, 100), 2)
+
+            # Get color of body parts using cv2 color map
+            matrix = (person.I*(255/25)).astype(np.uint8)
             matrix = cv2.applyColorMap(matrix, cv2.COLORMAP_PARULA)
 
             # Generate mask
-            mask = np.zeros(matrix.shape, dtype=np.uint8)
-            mask[person.S_ind < 0] = 1
+            mask3 = np.zeros(matrix.shape, dtype=np.uint8)
+            mask3[person.S != 0] = 1
+
+            # Apply UVs
+            matrix = matrix.astype(np.int16)
+            matrix[:, :, 0] += (person.U*200-100).astype(np.int8)
+            matrix[:, :, 1] += (person.V*200-100).astype(np.int8)
+            matrix = np.clip(matrix, 0, 255).astype(np.uint8)
 
             # Resize matrix and mask
             dims = (bnds[2]-bnds[0], bnds[3]-bnds[1])
             matrix = cv2.resize(matrix, dims, interpolation=cv2.INTER_AREA)
-            mask = cv2.resize(mask, dims, interpolation=cv2.INTER_AREA)
+            mask3 = cv2.resize(mask3, dims, interpolation=cv2.INTER_AREA)
 
             # Overlay image
-            alpha = 0.2
+            alpha = 0.3
             overlap = image[bnds[1]:bnds[3], bnds[0]:bnds[2]]
-            matrix = matrix*alpha + overlap*(1.0-alpha)
+            matrix = np.where(mask3, matrix*alpha + overlap*(1.0-alpha), overlap)
             image[bnds[1]:bnds[3], bnds[0]:bnds[2]] = matrix
-
-        for person in people:
-            break
-            print(image.shape)
-            print("I", person.I.shape)
-            print("U", person.U.shape)
-            print("V", person.V.shape)
-            print("S", person.S.shape)
-            personOverlay = np.dstack((50 + person.I * 8, person.U * 255, person.V * 255))
-            personOverlayGuide = np.dstack((person.I, person.I, person.I))
-            print("Person Overlay", personOverlay.shape)
-            print("Person Overlay Guide", personOverlayGuide.shape)
-            print("Unique S:")
-            for k in person.S:
-                print(k.shape)
-            print(person.S[0, :, :])
-            image = np.where(personOverlayGuide, personOverlay, image)
 
         return image
