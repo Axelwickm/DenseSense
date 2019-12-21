@@ -60,23 +60,7 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
             i += 1
 
         self._updateExistingPeople(people, status, deltaTime)
-
         self._changeStates(people, associations)
-
-        self.ghostBounds = []
-        self.keptAliveIndex = []
-        self.predictions = []
-
-        if debug: # TODO: maybe not have this here
-            for person in self.oldPeople:
-                self.predictions.append((person.id,
-                                         np.squeeze(person.attrs["track"]["kalmanPrediciton"][:2]),
-                                         person.attrs["track"]["isVisible"]))
-                if not person.attrs["track"]["isVisible"]:
-                    self.ghostBounds.append(person.bounds)
-                elif person.attrs["track"]["isVisible"] and person.attrs["track"]["lastSeenFrame"] != self.frame:
-                    self.keptAliveIndex.append(person.id)
-
 
     def _match(self, person, associations):
         # Convert to center and dim coords
@@ -184,21 +168,17 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
 
             if self.hide < persistence and self.minFrames < len(track["history"]):
                 track["isVisible"] = True  # The person is seen, and should keep being visible
-                print("visible")
             else:
                 track["isVisible"] = False  # The person should not be seen
                 if track["lastSeenFrame"] == self.frame:  # Suppress if he/she is
-                    print("suppress", self.oldPeople[i].attrs["originalIndex"])
                     toRemove.append(self.oldPeople[i].attrs["originalIndex"])
 
             if persistence < self.delete:
-                print("forget")
                 del self.oldPeople[i]  # Deleting from tracked objects
                 continue
 
             # If shouldn't be removed and not seen, then hallucinate the person
             if track["lastSeenFrame"] != self.frame and track["isVisible"]:
-                print("hallucinate")
                 people.append(self.oldPeople[i])
 
             i += 1
@@ -206,5 +186,22 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
         for index in sorted(toRemove, reverse=True):
             del people[index]
 
-    def renderDebug(self, image):
-        pass
+    def renderDebug(self, image, people):
+        for person in self.oldPeople:
+            bnds = person.bounds.astype(np.uint32)
+            if not person.attrs["track"]["isVisible"]:
+                # Draw dark rectangle to indicate this person is being suppressed
+                image = cv2.rectangle(image, (bnds[0], bnds[1]),
+                                             (bnds[2], bnds[3]), (10, 10, 10), 1)
+            else:
+                # Person is visible
+                if person.attrs["track"]["lastSeenFrame"] != self.frame:
+                    # Person is being hallucinated, indicated by filled rectangle
+                    image[bnds[1]:bnds[3]:3, bnds[0]:bnds[2]:3] = person.color
+
+                # Daw bright rectangle
+                image = cv2.rectangle(image, (bnds[0], bnds[1]),
+                                      (bnds[2], bnds[3]),
+                                      person.color, 2)
+
+        return image
