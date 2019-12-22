@@ -9,6 +9,7 @@ import cv2
 import numpy as np
 
 from DenseSense.algorithms.densepose import DenseposeExtractor
+from DenseSense.algorithms.refiner import Refiner
 from DenseSense.algorithms.people_extractor import PeopleExtractor
 from DenseSense.algorithms.people_tracker import People_Tracker
 #from DenseSense.algorithms.uv_extractor import UV_Extractor
@@ -28,6 +29,7 @@ def main():
     cam = cv2.VideoCapture(0)
 
     dp = DenseposeExtractor()
+    rf = Refiner()
     #pe = PeopleExtractor()
     pt = People_Tracker()
     #uv =  UV_Extractor()
@@ -44,8 +46,12 @@ def main():
         people = dp.extract(image)
         debugImage = dp.renderDebug(debugImage, people)
 
+        # Refine DensePose output to get actual people
+        people = rf.extract(people)
+        debugImage = rf.renderDebug(debugImage)
+
         # Track the people (which modifies the people variables)
-        pt.extract(people, True)
+        #pt.extract(people, True)
         #debugImage = pt.renderDebug(debugImage, people)
 
         # Extact UV map for each person
