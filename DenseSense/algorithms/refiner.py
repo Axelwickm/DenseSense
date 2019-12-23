@@ -44,6 +44,8 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
 
             self.conv_last = nn.Conv2d(8, 1, 1)
 
+            self.sigmoid = nn.Sigmoid()
+
         def forward(self, people):
             if len(people) == 0:
                 return np.array([])
@@ -87,7 +89,8 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
             x = torch.cat([x, conv1], dim=1)
 
             x = self.dconvup1(x)
-            out = self.conv_last(x)
+            x = self.conv_last(x)
+            out = self.sigmoid(x)
 
             return out
 
