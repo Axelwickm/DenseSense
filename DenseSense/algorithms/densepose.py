@@ -20,7 +20,7 @@ cfg.NUM_GPUS = 1
 add_densepose_config(cfg)
 cfg.merge_from_file(config_fpath)
 cfg.MODEL.WEIGHTS = model_fpath
-cfg.MODEL.DEVICE = "cpu"
+cfg.MODEL.DEVICE = "cpu" # FIXME
 cfg.freeze()
 
 
@@ -28,6 +28,7 @@ class DenseposeExtractor(Algorithm):
     def __init__(self):
         super().__init__()
         self.predictor = DefaultPredictor(cfg)
+        self.AREA_THRESHOLD = 40*40
 
     def extract(self, image):
         with torch.no_grad():
@@ -38,9 +39,15 @@ class DenseposeExtractor(Algorithm):
 
         people = []
         for i in range(len(boxes)):
+            # Filter depending on area
+            bounds = boxes.tensor[i].numpy()
+            area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
+            if area < self.AREA_THRESHOLD:
+                continue
+
             # Create new person
             person = Person()
-            person.bounds = boxes.tensor[i].numpy()
+            person.bounds = bounds
 
             S = bodies.S[i]
             I = bodies.I[i]
@@ -62,7 +69,7 @@ class DenseposeExtractor(Algorithm):
             people.append(person)
 
         return people
-
+    
     def train(self, saveModel):
         raise Exception("DensePose algorithm cannot be trained from within DenseSense")
 
