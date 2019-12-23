@@ -118,10 +118,9 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
         from os import path
 
         # TODO: specify path from outside class
-        dataDir = '.'
         dataType = 'val2017'
-        annFile = '{}/annotations/instances_{}.json'.format(dataDir, dataType)
-        self.cocoPath = '{}/annotations/{}'.format(dataDir, dataType)
+        annFile = './annotations/instances_{}.json'.format(dataType)
+        self.cocoPath = './data/{}'.format(dataType)
 
         self.coco = COCO(annFile)
         self.personCatID = self.coco.getCatIds(catNms=['person'])[0]
@@ -145,19 +144,6 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
         # TODO: merge masks and negated masks with segmentation mask from DensePose
 
         # TODO: find overlapping ROIs and merge the ones where the masks correlate
-        """
-        def pairwise_overlaps(a): # https://stackoverflow.com/a/42611619
-                rl = np.minimum(a[:, 2], a[:, None, 2]) - np.maximum(a[:, 0], a[:, None, 0])
-                bt = np.minimum(a[:, 3], a[:, None, 3]) - np.maximum(a[:, 1], a[:, None, 1])
-                si_vectorized2D = rl * bt
-                slicedA_comps = ((a[:, 2] - a[:, 0]) * (a[:, 3] - a[:, 1]) + 0.0)
-                print("sa")
-                print(si_vectorized2D)
-                print(si_vectorized2D.shape)
-                overlaps2D = si_vectorized2D / slicedA_comps[:, None]
-                return overlaps2D
-
-        """
 
         # TODO: filter people and update their data
 
@@ -288,7 +274,7 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
                 self.optimizer.step()
                 self.optimizer.zero_grad()
                 lossSize = lossSize.cpu().item()
-                print("Loss size: {}".format(lossSize))
+                print("Loss size: \t\t{}".format(lossSize))
 
                 plt.ion()
                 plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
@@ -332,7 +318,7 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
             mask = cv2.resize(mask, dims, interpolation=cv2.INTER_AREA)
 
             # Overlay image
-            alpha = 0.65
+            alpha = 0.5
             overlap = image[bnds[1]:bnds[3], bnds[0]:bnds[2]]
             mask = mask * alpha + overlap * (1.0 - alpha)
             image[bnds[1]:bnds[3], bnds[0]:bnds[2]] = mask
