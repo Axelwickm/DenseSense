@@ -23,24 +23,41 @@ cfg.MODEL.WEIGHTS = model_fpath
 cfg.MODEL.DEVICE = "cpu" # FIXME
 cfg.freeze()
 
+import os
+import psutil
+
 
 class DenseposeExtractor(Algorithm):
-    def __init__(self):
+    def __init__(self, maxImageDim=320):
         super().__init__()
         self.predictor = DefaultPredictor(cfg)
         self.AREA_THRESHOLD = 40*40
+        self.MaxImageDim = maxImageDim
 
     def extract(self, image):
+        # Potentially scale down image to limit memory usage
+        oDim = image.shape  # old dims
+        image = self._rescaleImage(image)
+        nDim = image.shape  # new dims
+
+        # Do inference
         with torch.no_grad():
+            process = psutil.Process(os.getpid())
+            print("Memory usage before DensePose: {0:.2f} GB".format(process.memory_info().rss/1e9))
             ret = self.predictor(image)["instances"].to("cpu")
 
+        # Do post processing and compile results into list
         boxes = ret.get("pred_boxes")
         bodies = ret.get("pred_densepose")
-
         people = []
         for i in range(len(boxes)):
-            # Filter depending on area
+            # Transform internal bounds to original bounds
             bounds = boxes.tensor[i].numpy()
+            bounds[: :2] = bounds[: :2]/nDim[1]*oDim[1]
+            bounds[1: :2] = bounds[1: :2]/nDim[0]*oDim[0]
+            bounds = bounds.astype(np.int32)
+
+            # Filter depending on area
             area = (bounds[2] - bounds[0]) * (bounds[3] - bounds[1])
             if area < self.AREA_THRESHOLD:
                 continue
@@ -72,6 +89,19 @@ class DenseposeExtractor(Algorithm):
     
     def train(self, saveModel):
         raise Exception("DensePose algorithm cannot be trained from within DenseSense")
+
+    def _rescaleImage(self, image):
+        IS = image.shape
+        aspect = image.shape[1] / image.shape[0]
+        if self.MaxImageDim < IS[0] and IS[1] < IS[0]:
+            dims = (self.MaxImageDim, int(self.MaxImageDim*aspect))
+            dims = (dims[1], dims[0])
+            image = cv2.resize(image, dims, interpolation=cv2.INTER_AREA)
+        elif self.MaxImageDim < IS[1] and IS[0] < IS[1]:
+            dims = (int(self.MaxImageDim/aspect), self.MaxImageDim)
+            dims = (dims[1], dims[0])
+            image = cv2.resize(image, dims, interpolation=cv2.INTER_AREA)
+        return image
 
     def renderDebug(self, image, people):
         image = image.astype(np.uint8)
