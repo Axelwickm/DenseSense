@@ -1,4 +1,6 @@
 import DenseSense.algorithms.Algorithm
+from DenseSense.algorithms.densepose import DenseposeExtractor
+from DenseSense.utils.LMDB_helper import LMDB_helper
 
 import cv2
 import numpy as np
@@ -110,7 +112,7 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
         self._ROI_masks = torch.Tensor()
         self._ROI_bounds = np.array([])
 
-    def _initTraining(self):
+    def _initTraining(self, useDatabase):
         # Dataset is COCO
         print("Initiating training of Refiner MaskGenerator")
         print("Loading COCO")
@@ -127,14 +129,17 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
         self.cocoImageIds = self.coco.getImgIds(catIds=self.personCatID)
         self.cocoOnDisk = path.exists(self.cocoPath)
 
-        print("Dataset size: {}".format(len(self.cocoImageIds)))
-        print("Found on disk:", self.cocoOnDisk)
+        print("Coco dataset size: {}".format(len(self.cocoImageIds)))
+        print("Coco images found on disk:", self.cocoOnDisk)
+
+        # Init LMDB_helper
+        if useDatabase:
+            self.lmdb = LMDB_helper("a")
 
         # Init loss function and optimizer
         self.optimizer = torch.optim.Adam(self.maskGenerator.parameters(), lr=0.0003)
 
         # Init DensePose extractor
-        from DenseSense.algorithms.densepose import DenseposeExtractor
         self.denseposeExtractor = DenseposeExtractor()
 
     def extract(self, people):
@@ -155,10 +160,10 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
         for i in range(len(ROIs)):
             self._ROI_bounds[i] = np.array(ROIs[i].bounds, dtype=np.int32)
 
-    def train(self):
+    def train(self, useDatabase=True):
         self._training = True
         if not self._trainingInitiated:
-            self._initTraining()
+            self._initTraining(useDatabase)
 
         Epochs = 100
         Iterations = len(self.cocoImageIds)
@@ -193,8 +198,16 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
 
                 seg_bounds = np.array(seg_bounds, dtype=np.int32)
 
-                # Run DensePose extractor
-                ROIs = self.denseposeExtractor.extract(image)
+                # Get DensePose data from DB or Extractor
+                generated = False
+                ROIs = None
+                if useDatabase:
+                    ROIs = self.lmdb.get(DenseposeExtractor, "coco"+str(cocoImage["id"]))
+                if ROIs is None:
+                    ROIs = self.denseposeExtractor.extract(image)
+                    generated = True
+                if useDatabase and generated:
+                    self.lmdb.save(DenseposeExtractor, "coco"+str(cocoImage["id"]), ROIs)
 
                 # Run prediction
                 self._generateMasks(ROIs)
@@ -209,6 +222,8 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
                 )
 
                 overlapsInds = np.array(list(zip(*np.where(overlaps))))
+                if overlapsInds.shape[0] == 0:
+                    continue
 
                 # Get average value where there is overlap between COCO-mask for each person and predictions for
                 contentAverage = {}

@@ -1,4 +1,5 @@
 models/*
+data/*
 annotations/*
 
 # Created by https://www.gitignore.io/api/python
