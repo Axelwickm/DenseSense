@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Capture webcamera input and run densepose, people tracking,
+Capture web camera input and run DensePose, people tracking,
 UV-extraction and label classification with debug views
 turned on.
 """
@@ -8,11 +8,10 @@ turned on.
 import cv2
 import numpy as np
 
-from DenseSense.algorithms.densepose import DenseposeExtractor
-from DenseSense.algorithms.refiner import Refiner
-from DenseSense.algorithms.people_extractor import PeopleExtractor
-from DenseSense.algorithms.people_tracker import People_Tracker
-#from DenseSense.algorithms.uv_extractor import UV_Extractor
+from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
+from DenseSense.algorithms.Sanitizer import Sanitizer
+#from DenseSense.algorithms.Tracker import Tracker
+#from DenseSense.algorithms.uv_extractor import UVMapper
 
 
 def white_balance(image):
@@ -28,34 +27,34 @@ def white_balance(image):
 def main():
     cam = cv2.VideoCapture(0)
 
-    dp = DenseposeExtractor()
-    rf = Refiner()
-    #pe = PeopleExtractor()
-    pt = People_Tracker()
-    #uv =  UV_Extractor()
+    densepose = DensePoseWrapper()
+    sanitizer = Sanitizer()
+    #tracker = Tracker()
+    #uvMapper =  UVMapper()
 
     while True:
         # Get image from webcam
         return_value, image = cam.read()
+        assert return_value, "Failed to read from web camera"
 
         # White balance the image to get better color features
         image = white_balance(image)
         debugImage = image.copy()
 
         # Send image to DensePose
-        people = dp.extract(image)
-        debugImage = dp.renderDebug(debugImage, people)
+        people = densepose.extract(image)
+        debugImage = densepose.renderDebug(debugImage, people)
 
         # Refine DensePose output to get actual people
-        people = rf.extract(people)
-        debugImage = rf.renderDebug(debugImage)
+        people = sanitizer.extract(people)
+        debugImage = sanitizer.renderDebug(debugImage)
 
         # Track the people (which modifies the people variables)
-        #pt.extract(people, True)
-        #debugImage = pt.renderDebug(debugImage, people)
+        #tracker.extract(people, True)
+        #debugImage = tracker.renderDebug(debugImage, people)
 
         # Extact UV map for each person
-        #uvs = uv.extract(people, mergedIUVs, image)
+        #uvs = uvMapper.extract(people, mergedIUVs, image)
 
         # Show image
         print("Show image")

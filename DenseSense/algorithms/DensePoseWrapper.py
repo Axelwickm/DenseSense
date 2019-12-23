@@ -1,15 +1,15 @@
+from DenseSense.Person import Person
+from DenseSense.algorithms.Algorithm import Algorithm
+
 import cv2
 import numpy as np
-import torch
+import os
+import psutil
 
+import torch
+from densepose import add_densepose_config
 from detectron2.config import get_cfg
 from detectron2.engine.defaults import DefaultPredictor
-
-from densepose import add_densepose_config
-
-from DenseSense.algorithms.Algorithm import Algorithm
-from DenseSense.Person import Person
-
 
 # TODO: set these paths outside this file
 config_fpath = "./models/densepose_rcnn_R_50_FPN_s1x.yaml"
@@ -20,18 +20,15 @@ cfg.NUM_GPUS = 1
 add_densepose_config(cfg)
 cfg.merge_from_file(config_fpath)
 cfg.MODEL.WEIGHTS = model_fpath
-cfg.MODEL.DEVICE = "cpu" # FIXME
+cfg.MODEL.DEVICE = "cpu"  # FIXME
 cfg.freeze()
 
-import os
-import psutil
 
-
-class DenseposeExtractor(Algorithm):
+class DensePoseWrapper(Algorithm):
     def __init__(self, maxImageDim=320):
         super().__init__()
         self.predictor = DefaultPredictor(cfg)
-        self.AREA_THRESHOLD = 40*40
+        self.AREA_THRESHOLD = 40 * 40
         self.MaxImageDim = maxImageDim
 
     def extract(self, image):
@@ -43,7 +40,7 @@ class DenseposeExtractor(Algorithm):
         # Do inference
         with torch.no_grad():
             process = psutil.Process(os.getpid())
-            print("Memory usage before DensePose: {0:.2f} GB".format(process.memory_info().rss/1e9))
+            print("Memory usage before DensePose: {0:.2f} GB".format(process.memory_info().rss / 1e9))
             ret = self.predictor(image)["instances"].to("cpu")
 
         # Do post processing and compile results into list
@@ -53,8 +50,8 @@ class DenseposeExtractor(Algorithm):
         for i in range(len(boxes)):
             # Transform internal bounds to original bounds
             bounds = boxes.tensor[i].numpy()
-            bounds[: :2] = bounds[: :2]/nDim[1]*oDim[1]
-            bounds[1: :2] = bounds[1: :2]/nDim[0]*oDim[0]
+            bounds[::2] = bounds[::2] / nDim[1] * oDim[1]
+            bounds[1::2] = bounds[1::2] / nDim[0] * oDim[0]
             bounds = bounds.astype(np.int32)
 
             # Filter depending on area
@@ -70,7 +67,7 @@ class DenseposeExtractor(Algorithm):
             I = bodies.I[i]
 
             # Merge S and I
-            person.S = S.argmax(dim=0).cpu().numpy()         # Most activated segment (0 is background)
+            person.S = S.argmax(dim=0).cpu().numpy()  # Most activated segment (0 is background)
             mask = (person.S > 0)
             person.I = I.argmax(dim=0).cpu().numpy() * mask  # Most activated body part
 
@@ -86,7 +83,7 @@ class DenseposeExtractor(Algorithm):
             people.append(person)
 
         return people
-    
+
     def train(self, saveModel):
         raise Exception("DensePose algorithm cannot be trained from within DenseSense")
 
@@ -94,11 +91,11 @@ class DenseposeExtractor(Algorithm):
         IS = image.shape
         aspect = image.shape[1] / image.shape[0]
         if self.MaxImageDim < IS[0] and IS[1] < IS[0]:
-            dims = (self.MaxImageDim, int(self.MaxImageDim*aspect))
+            dims = (self.MaxImageDim, int(self.MaxImageDim * aspect))
             dims = (dims[1], dims[0])
             image = cv2.resize(image, dims, interpolation=cv2.INTER_AREA)
         elif self.MaxImageDim < IS[1] and IS[0] < IS[1]:
-            dims = (int(self.MaxImageDim/aspect), self.MaxImageDim)
+            dims = (int(self.MaxImageDim / aspect), self.MaxImageDim)
             dims = (dims[1], dims[0])
             image = cv2.resize(image, dims, interpolation=cv2.INTER_AREA)
         return image
@@ -110,11 +107,11 @@ class DenseposeExtractor(Algorithm):
             # Draw bounding box rectangle
             bnds = person.bounds.astype(np.uint32)
             image = cv2.rectangle(image, (bnds[0], bnds[1]),
-                                         (bnds[2], bnds[3]),
-                                         (100, 100, 100), 2)
+                                  (bnds[2], bnds[3]),
+                                  (100, 100, 100), 2)
 
             # Get color of body parts using cv2 color map
-            matrix = (person.I*(255/25)).astype(np.uint8)
+            matrix = (person.I * (255 / 25)).astype(np.uint8)
             matrix = cv2.applyColorMap(matrix, cv2.COLORMAP_PARULA)
 
             # Generate mask
@@ -123,19 +120,19 @@ class DenseposeExtractor(Algorithm):
 
             # Apply UVs
             matrix = matrix.astype(np.int16)
-            matrix[:, :, 0] += (person.U*200-100).astype(np.int8)
-            matrix[:, :, 1] += (person.V*200-100).astype(np.int8)
+            matrix[:, :, 0] += (person.U * 200 - 100).astype(np.int8)
+            matrix[:, :, 1] += (person.V * 200 - 100).astype(np.int8)
             matrix = np.clip(matrix, 0, 255).astype(np.uint8)
 
             # Resize matrix and mask
-            dims = (bnds[2]-bnds[0], bnds[3]-bnds[1])
+            dims = (bnds[2] - bnds[0], bnds[3] - bnds[1])
             matrix = cv2.resize(matrix, dims, interpolation=cv2.INTER_AREA)
             mask3 = cv2.resize(mask3, dims, interpolation=cv2.INTER_AREA)
 
             # Overlay image
             alpha = 0.3
             overlap = image[bnds[1]:bnds[3], bnds[0]:bnds[2]]
-            matrix = np.where(mask3, matrix*alpha + overlap*(1.0-alpha), overlap)
+            matrix = np.where(mask3, matrix * alpha + overlap * (1.0 - alpha), overlap)
             image[bnds[1]:bnds[3], bnds[0]:bnds[2]] = matrix
 
         return image

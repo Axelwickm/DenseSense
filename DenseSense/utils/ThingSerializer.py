@@ -4,6 +4,7 @@ import zlib
 # Currently just pickles things,
 # but there is room for expansion
 
+
 class ThingSerializer:
     @staticmethod
     def encode(thing):

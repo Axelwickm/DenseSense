@@ -1,28 +1,26 @@
 import DenseSense.algorithms.Algorithm
-from DenseSense.algorithms.densepose import DenseposeExtractor
-from DenseSense.utils.LMDB_helper import LMDB_helper
+from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
+from DenseSense.utils.LMDBHelper import LMDBHelper
 
 import cv2
+import matplotlib.pyplot as plt
 import numpy as np
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-import time
-import matplotlib.pyplot as plt
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 if torch.cuda.is_available():
     torch.set_default_tensor_type(torch.cuda.FloatTensor)
-print("PyTorch running on: "+str(device))
+print("PyTorch running on: " + str(device))
 
 
-class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
+class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
     # UNet, inspired by https://github.com/usuyama/pytorch-unet/
     class MaskGenerator(nn.Module):
         def __init__(self):
-            super(Refiner.MaskGenerator, self).__init__()
+            super(Sanitizer.MaskGenerator, self).__init__()
 
             def double_conv(in_channels, out_channels):
                 return nn.Sequential(
@@ -38,7 +36,7 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
 
             self.maxpool = nn.MaxPool2d(2)
             self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-            self.fc = nn.Linear(2, 14*14)
+            self.fc = nn.Linear(2, 14 * 14)
             self.relu = nn.ReLU()
 
             self.dconvup2 = double_conv(16 + 32, 16)
@@ -59,17 +57,17 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
                 person = people[i]
                 x[i][0] = torch.from_numpy(person.S)
                 bnds = person.bounds
-                area = np.power(np.sqrt((bnds[2]-bnds[0])*(bnds[3]-bnds[1])), 0.2)
+                area = np.power(np.sqrt((bnds[2] - bnds[0]) * (bnds[3] - bnds[1])), 0.2)
                 if bnds[3] == bnds[1]:
                     aspect = 0
                 else:
-                    aspect = (bnds[2]-bnds[0])/(bnds[3]-bnds[1])
+                    aspect = (bnds[2] - bnds[0]) / (bnds[3] - bnds[1])
                 b[i] = torch.Tensor([area, aspect])
             x = x.to(device)
             b = b.to(device)
 
             # Normalize input
-            x[0 < x] = x[0 < x]/15.0*0.5+0.5
+            x[0 < x] = x[0 < x] / 15.0 * 0.5 + 0.5
 
             # Run model
             conv1 = self.dconv1down(x)
@@ -81,7 +79,7 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
 
             y = self.fc(b)
             y = self.relu(y).view(-1, 1, 14, 14)
-            x = x+y
+            x = x + y
 
             x = self.upsample(x)
             x = torch.cat([x, conv2], dim=1)
@@ -100,10 +98,10 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
         super().__init__()
 
         # Generate and maybe load mask generator model
-        self.maskGenerator = Refiner.MaskGenerator()
+        self.maskGenerator = Sanitizer.MaskGenerator()
         self.modelPath = modelPath
         if self.modelPath is not None:
-            print("Loading Refiner MaskGenerator file from: " + self.modelPath)
+            print("Loading Sanitizer MaskGenerator file from: " + self.modelPath)
             self.maskGenerator.load_state_dict(torch.load(self.modelPath))
             self.maskGenerator.to(device)
 
@@ -114,7 +112,7 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
 
     def _initTraining(self, useDatabase):
         # Dataset is COCO
-        print("Initiating training of Refiner MaskGenerator")
+        print("Initiating training of Sanitizer MaskGenerator")
         print("Loading COCO")
         from pycocotools.coco import COCO
         from os import path
@@ -134,13 +132,13 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
 
         # Init LMDB_helper
         if useDatabase:
-            self.lmdb = LMDB_helper("a")
+            self.lmdb = LMDBHelper("a")
 
         # Init loss function and optimizer
         self.optimizer = torch.optim.Adam(self.maskGenerator.parameters(), lr=0.0003)
 
         # Init DensePose extractor
-        self.denseposeExtractor = DenseposeExtractor()
+        self.denseposeExtractor = DensePoseWrapper()
 
     def extract(self, people):
         # Generate masks for all ROIs (people) using neural network model
@@ -194,7 +192,7 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
                             print(person["id"], "has", s)
                     segs.append(mask)
                     bbox = person["bbox"]
-                    seg_bounds.append(np.array([bbox[0], bbox[1], bbox[0]+bbox[2], bbox[1]+bbox[3]]))
+                    seg_bounds.append(np.array([bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3]]))
 
                 seg_bounds = np.array(seg_bounds, dtype=np.int32)
 
@@ -202,12 +200,12 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
                 generated = False
                 ROIs = None
                 if useDatabase:
-                    ROIs = self.lmdb.get(DenseposeExtractor, "coco"+str(cocoImage["id"]))
+                    ROIs = self.lmdb.get(DensePoseWrapper, "coco" + str(cocoImage["id"]))
                 if ROIs is None:
                     ROIs = self.denseposeExtractor.extract(image)
                     generated = True
                 if useDatabase and generated:
-                    self.lmdb.save(DenseposeExtractor, "coco"+str(cocoImage["id"]), ROIs)
+                    self.lmdb.save(DensePoseWrapper, "coco" + str(cocoImage["id"]), ROIs)
 
                 # Run prediction
                 self._generateMasks(ROIs)
@@ -232,15 +230,15 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
                     yCoords = np.array([overlapLow[1][a, b], overlapHigh[1][a, b]])
 
                     cv2.rectangle(image, (xCoords[0], yCoords[0],
-                                          xCoords[1]-xCoords[0], yCoords[1]-yCoords[0]),
+                                          xCoords[1] - xCoords[0], yCoords[1] - yCoords[0]),
                                   (200, 100, 100), 2)
 
                     # ROI transformed overlap area
-                    ROI_xCoords = (xCoords-self._ROI_bounds[a][0])/(self._ROI_bounds[a][2]-self._ROI_bounds[a][0])
-                    ROI_xCoords = (ROI_xCoords*56).astype(np.int32)
+                    ROI_xCoords = (xCoords - self._ROI_bounds[a][0]) / (self._ROI_bounds[a][2] - self._ROI_bounds[a][0])
+                    ROI_xCoords = (ROI_xCoords * 56).astype(np.int32)
                     ROI_xCoords[1] += ROI_xCoords[0] == ROI_xCoords[1]
-                    ROI_yCoords = (yCoords-self._ROI_bounds[a][1])/(self._ROI_bounds[a][3]-self._ROI_bounds[a][1])
-                    ROI_yCoords = (ROI_yCoords*56).astype(np.int32)
+                    ROI_yCoords = (yCoords - self._ROI_bounds[a][1]) / (self._ROI_bounds[a][3] - self._ROI_bounds[a][1])
+                    ROI_yCoords = (ROI_yCoords * 56).astype(np.int32)
                     ROI_yCoords[1] += ROI_yCoords[0] == ROI_yCoords[1]
 
                     ROI_mask = self._ROI_masks[a, 0][ROI_yCoords[0]:ROI_yCoords[1], ROI_xCoords[0]:ROI_xCoords[1]]
@@ -272,8 +270,8 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
                     # Choose the two segments which gives the most content
                     A = np.array([float(x.cpu()) for x in contentAverage[a]])
                     AN = np.array([float(x.cpu()) for x in contentAverage[-a]])
-                    matrix = A[:]+AN[:, None]
-                    matrix *= 1-5*np.identity(AN.shape[0])
+                    matrix = A[:] + AN[:, None]
+                    matrix *= 1 - 5 * np.identity(AN.shape[0])
                     aMax = np.unravel_index(matrix.argmax(), matrix.shape)
 
                     # Add to loss tensor
@@ -281,7 +279,7 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
                         s = contentAverage[a][aMax[0]]
                     else:
                         s = contentAverage[a][aMax[0]] + contentAverage[-a][aMax[1]]
-                    lossTensor.append(1.0/(s+4))  # TODO: better loss function
+                    lossTensor.append(1.0 / (s + 4))  # TODO: better loss function
 
                 # Modify weights
                 lossSize = torch.stack(lossTensor).sum()
@@ -314,7 +312,7 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
 
     def renderDebug(self, image):
         # Normalize ROIs from (0, 1) to (0, 255)
-        ROIsMaskNorm = self._ROI_masks*255
+        ROIsMaskNorm = self._ROI_masks * 255
 
         # Render masks on image
         for i in range(len(self._ROI_masks)):
@@ -344,7 +342,7 @@ class Refiner(DenseSense.algorithms.Algorithm.Algorithm):
         if self.cocoOnDisk:
             # Load image from disk
             cocoImage = self.coco.loadImgs(self.cocoImageIds[index])[0]
-            image = cv2.imread(self.cocoPath+"/"+cocoImage["file_name"])
+            image = cv2.imread(self.cocoPath + "/" + cocoImage["file_name"])
             return cocoImage, image
         else:
             raise FileNotFoundError("COCO image cant be found on disk")

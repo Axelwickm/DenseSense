@@ -1,12 +1,13 @@
-import cv2
-import numpy as np
-import time
-
 import DenseSense.algorithms.Algorithm
+
+import time
 from collections import deque
 
+import cv2
+import numpy as np
 
-class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
+
+class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
     def __init__(self, distThreshold=500, delete=0.3, hide=0.5,
                  minFrames=3, maxPersistanceBufferSize=15):
         super().__init__()
@@ -192,7 +193,7 @@ class People_Tracker(DenseSense.algorithms.Algorithm.Algorithm):
             if not person.attrs["track"]["isVisible"]:
                 # Draw dark rectangle to indicate this person is being suppressed
                 image = cv2.rectangle(image, (bnds[0], bnds[1]),
-                                             (bnds[2], bnds[3]), (10, 10, 10), 1)
+                                      (bnds[2], bnds[3]), (10, 10, 10), 1)
             else:
                 # Person is visible
                 if person.attrs["track"]["lastSeenFrame"] != self.frame:
