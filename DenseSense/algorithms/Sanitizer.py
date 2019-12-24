@@ -94,33 +94,39 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
             return out
 
-    def __init__(self, modelPath=None):
+    def __init__(self):
         super().__init__()
 
         # Generate and maybe load mask generator model
         self.maskGenerator = Sanitizer.MaskGenerator()
-        self.modelPath = modelPath
-        if self.modelPath is not None:
-            print("Loading Sanitizer MaskGenerator file from: " + self.modelPath)
-            self.maskGenerator.load_state_dict(torch.load(self.modelPath))
-            self.maskGenerator.to(device)
+        self.modelPath = None
 
         self._training = False
         self._trainingInitiated = False
         self._ROI_masks = torch.Tensor()
         self._ROI_bounds = np.array([])
 
-    def _initTraining(self, useDatabase):
+    def loadModel(self, modelPath):
+        self.modelPath = modelPath
+        print("Loading Sanitizer MaskGenerator file from: " + self.modelPath)
+        self.maskGenerator.load_state_dict(torch.load(self.modelPath))
+        self.maskGenerator.to(device)
+
+    def saveModel(self, modelPath):
+        self.modelPath = modelPath
+        print("Saving Sanitizer MaskGenerator model to: "+self.modelPath)
+        torch.save(self.maskGenerator, self.modelPath)
+
+    def _initTraining(self, dataset, useDatabase):
         # Dataset is COCO
         print("Initiating training of Sanitizer MaskGenerator")
         print("Loading COCO")
         from pycocotools.coco import COCO
         from os import path
 
-        # TODO: specify path from outside class
-        dataType = 'val2017'
-        annFile = './annotations/instances_{}.json'.format(dataType)
-        self.cocoPath = './data/{}'.format(dataType)
+        # TODO: support other data sets than Coco
+        annFile = './annotations/instances_{}.json'.format(dataset)
+        self.cocoPath = './data/{}'.format(dataset)
 
         self.coco = COCO(annFile)
         self.personCatID = self.coco.getCatIds(catNms=['person'])[0]
@@ -133,6 +139,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         # Init LMDB_helper
         if useDatabase:
             self.lmdb = LMDBHelper("a")
+            self.lmdb.verbose = False
 
         # Init loss function and optimizer
         self.optimizer = torch.optim.Adam(self.maskGenerator.parameters(), lr=0.0003)
@@ -158,18 +165,28 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         for i in range(len(ROIs)):
             self._ROI_bounds[i] = np.array(ROIs[i].bounds, dtype=np.int32)
 
-    def train(self, useDatabase=True):
+    def train(self, epochs=100, dataset="Coco",
+              useDatabase=True, printUpdateEvery=40, visualize=False):
+
         self._training = True
         if not self._trainingInitiated:
-            self._initTraining(useDatabase)
+            self._initTraining(dataset, useDatabase)
 
-        Epochs = 100
         Iterations = len(self.cocoImageIds)
+
+        # TODO: send this to some live vizualization tool
+        lossSizes = []
+        epochLossSizes = []
+
+        def printUpdate(loss, iteration):
+            lossSizes.append(loss/printUpdateEvery)
+            print("Iteration {} / {}".format(iteration, Iterations))
+            print("Loss size: {0:.5f}\n".format(lossSizes[-1]))
 
         print("Starting training")
 
-        for epoch in range(Epochs):
-            print("Starting epoch {} out of {}".format(epoch, Epochs))
+        for currentEpoch in range(epochs):
+            epochLoss = 0.0
             for i in range(Iterations):
 
                 # Load instance of COCO dataset
@@ -209,7 +226,8 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Run prediction
                 self._generateMasks(ROIs)
-                image = self.renderDebug(image)
+                if visualize:
+                    image = self.renderDebug(image)
                 if len(self._ROI_masks) == 0:
                     continue
 
@@ -229,9 +247,10 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                     xCoords = np.array([overlapLow[0][a, b], overlapHigh[0][a, b]])
                     yCoords = np.array([overlapLow[1][a, b], overlapHigh[1][a, b]])
 
-                    cv2.rectangle(image, (xCoords[0], yCoords[0],
-                                          xCoords[1] - xCoords[0], yCoords[1] - yCoords[0]),
-                                  (200, 100, 100), 2)
+                    if visualize:
+                        cv2.rectangle(image, (xCoords[0], yCoords[0],
+                                              xCoords[1] - xCoords[0], yCoords[1] - yCoords[0]),
+                                      (200, 100, 100), 2)
 
                     # ROI transformed overlap area
                     ROI_xCoords = (xCoords - self._ROI_bounds[a][0]) / (self._ROI_bounds[a][2] - self._ROI_bounds[a][0])
@@ -287,13 +306,21 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                 self.optimizer.step()
                 self.optimizer.zero_grad()
                 lossSize = lossSize.cpu().item()
-                print("Loss size: \t\t{}".format(lossSize))
 
-                plt.ion()
-                plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-                plt.draw()
-                plt.pause(0.05)
-                print("\n")
+                if (i-1) % printUpdateEvery == 0:
+                    printUpdate(lossSize, i)
+
+                # Show vizualization
+                if visualize:
+                    plt.ion()
+                    plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                    plt.draw()
+                    plt.pause(0.05)
+                    print("\n")
+
+            epochLossSizes.append(epochLoss)
+            print("Finished epoch {} / {}. Loss size:".format(currentEpoch, epochs, epochLoss))
+            self.saveModel(self.modelPath)
 
         self._training = False
 
