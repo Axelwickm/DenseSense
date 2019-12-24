@@ -1,11 +1,8 @@
 opencv-python
 opencv-contrib-python
 colormath
-numpy
+psutil
 scipy
 pafy
 ffmpeg
-torch
 future
-pycocotools
-scipy
