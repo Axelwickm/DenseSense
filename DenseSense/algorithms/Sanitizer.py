@@ -13,7 +13,7 @@ import torch.nn as nn
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 if torch.cuda.is_available():
     torch.set_default_tensor_type(torch.cuda.FloatTensor)
-print("PyTorch running on: " + str(device))
+print("Sanitizer running on: " + str(device))
 
 
 class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
@@ -50,19 +50,24 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             if len(people) == 0:
                 return np.array([])
 
-            # Send data to device
-            x = torch.Tensor(len(people), 1, 56, 56)
-            b = torch.Tensor(len(people), 2)
-            for i in range(len(people)):
-                person = people[i]
-                x[i][0] = torch.from_numpy(person.S)
-                bnds = person.bounds
-                area = np.power(np.sqrt((bnds[2] - bnds[0]) * (bnds[3] - bnds[1])), 0.2)
-                if bnds[3] == bnds[1]:
-                    aspect = 0
-                else:
-                    aspect = (bnds[2] - bnds[0]) / (bnds[3] - bnds[1])
-                b[i] = torch.Tensor([area, aspect])
+            if not isinstance(people, torch.Tensor):
+                # Send data to device
+                x = torch.Tensor(len(people), 1, 56, 56)
+                b = torch.Tensor(len(people), 2)
+                for i in range(len(people)):
+                    person = people[i]
+                    x[i][0] = torch.from_numpy(person.S)
+                    bnds = person.bounds
+                    area = np.power(np.sqrt((bnds[2] - bnds[0]) * (bnds[3] - bnds[1])), 0.2)
+                    if bnds[3] == bnds[1]:
+                        aspect = 0
+                    else:
+                        aspect = (bnds[2] - bnds[0]) / (bnds[3] - bnds[1])
+                    b[i] = torch.Tensor([area, aspect])
+            else:
+                x = people
+                b = torch.ones(people.shape[0], 2)
+
             x = x.to(device)
             b = b.to(device)
 
@@ -113,9 +118,11 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         self.maskGenerator.to(device)
 
     def saveModel(self, modelPath):
+        if modelPath is None:
+            print("Don't know where to save model")
         self.modelPath = modelPath
         print("Saving Sanitizer MaskGenerator model to: "+self.modelPath)
-        torch.save(self.maskGenerator, self.modelPath)
+        torch.save(self.maskGenerator.state_dict(), self.modelPath)
 
     def _initTraining(self, dataset, useDatabase):
         # Dataset is COCO
@@ -136,7 +143,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             annIds = self.coco.getAnnIds(imgIds=imgId, catIds=self.personCatID, iscrowd=False)
             annotation = self.coco.loadAnns(annIds)[0]
             return not annotation["iscrowd"]
-        
+
         self.cocoImageIds = list(filter(isNotCrowd, self.cocoImageIds))
         self.cocoOnDisk = path.exists(self.cocoPath)
 
@@ -173,22 +180,33 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             self._ROI_bounds[i] = np.array(ROIs[i].bounds, dtype=np.int32)
 
     def train(self, epochs=100, dataset="Coco",
-              useDatabase=True, printUpdateEvery=40, visualize=False):
+              useDatabase=True, printUpdateEvery=40,
+              visualize=False, tensorboard=False):
 
         self._training = True
         if not self._trainingInitiated:
             self._initTraining(dataset, useDatabase)
 
+        if tensorboard:
+            # from tensorboardX import SummaryWriter  # Seems to not close file properly
+            from torch.utils.tensorboard import SummaryWriter
+            writer = SummaryWriter("./data/tensorboard")
+
+            # dummy_input = torch.Tensor(5, 1, 56, 56)
+            # writer.add_graph(self.maskGenerator, dummy_input)
+            # writer.close()
+
         Iterations = len(self.cocoImageIds)
 
-        # TODO: send this to some live vizualization tool
         lossSizes = []
         epochLossSizes = []
 
-        def printUpdate(loss, iteration):
+        def printUpdate(loss, iteration, epoch):
             lossSizes.append(loss/printUpdateEvery)
-            print("Iteration {} / {}".format(iteration, Iterations))
+            print("Iteration {} / {}, epoch {} / {}".format(iteration, Iterations, epoch, epochs))
             print("Loss size: {0:.5f}\n".format(lossSizes[-1]))
+            if tensorboard:
+                writer.add_scalar("Loss size", loss, iteration+epoch*Iterations)
 
         print("Starting training")
 
@@ -232,6 +250,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                 self._generateMasks(ROIs)
                 if visualize:
                     image = self.renderDebug(image)
+
                 if len(self._ROI_masks) == 0:
                     continue
 
@@ -312,7 +331,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                 lossSize = lossSize.cpu().item()
 
                 if (i-1) % printUpdateEvery == 0:
-                    printUpdate(lossSize, i)
+                    printUpdate(lossSize, i, currentEpoch)
 
                 # Show vizualization
                 if visualize:
@@ -324,6 +343,8 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
             epochLossSizes.append(epochLoss)
             print("Finished epoch {} / {}. Loss size:".format(currentEpoch, epochs, epochLoss))
+            if tensorboard:
+                writer.add_scalar("epoch loss size", Iterations*currentEpoch)
             self.saveModel(self.modelPath)
 
         self._training = False

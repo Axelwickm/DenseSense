@@ -7,3 +7,5 @@ pafy
 ffmpeg
 future
 lmdb
+tensorboard
+tensorboardx
