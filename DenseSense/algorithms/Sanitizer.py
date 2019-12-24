@@ -114,7 +114,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
     def loadModel(self, modelPath):
         self.modelPath = modelPath
         print("Loading Sanitizer MaskGenerator file from: " + self.modelPath)
-        self.maskGenerator.load_state_dict(torch.load(self.modelPath))
+        self.maskGenerator.load_state_dict(torch.load(self.modelPath, map_location=device))
         self.maskGenerator.to(device)
 
     def saveModel(self, modelPath):
@@ -153,7 +153,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         # Init LMDB_helper
         if useDatabase:
             self.lmdb = LMDBHelper("a")
-            self.lmdb.verbose = False
+            self.lmdb.verbose = True
 
         # Init loss function and optimizer
         self.optimizer = torch.optim.Adam(self.maskGenerator.parameters(), lr=0.0003)
@@ -204,14 +204,14 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         def printUpdate(loss, iteration, epoch):
             lossSizes.append(loss/printUpdateEvery)
             print("Iteration {} / {}, epoch {} / {}".format(iteration, Iterations, epoch, epochs))
-            print("Loss size: {0:.5f}\n".format(lossSizes[-1]))
+            print("Loss size: {}\n".format(lossSizes[-1]))
             if tensorboard:
                 writer.add_scalar("Loss size", loss, iteration+epoch*Iterations)
 
         print("Starting training")
 
         for currentEpoch in range(epochs):
-            epochLoss = 0.0
+            epochLoss = np.float64(0)
             for i in range(Iterations):
 
                 # Load instance of COCO dataset
@@ -330,15 +330,16 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                 self.optimizer.zero_grad()
                 lossSize = lossSize.cpu().item()
 
+                epochLoss += lossSize/Iterations
                 if (i-1) % printUpdateEvery == 0:
                     printUpdate(lossSize, i, currentEpoch)
 
-                # Show vizualization
+                # Show visualization
                 if visualize:
                     plt.ion()
                     plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
                     plt.draw()
-                    plt.pause(0.05)
+                    plt.pause(0.001)
                     print("\n")
 
             epochLossSizes.append(epochLoss)
