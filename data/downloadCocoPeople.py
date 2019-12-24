@@ -1,9 +1,7 @@
 from argparse import ArgumentParser
 from pycocotools.coco import COCO
 import os
-import urllib
-import workerpool
-
+from parfive import Downloader
 
 parser = ArgumentParser()
 parser.add_argument("dataset", help="Which coco dataset to download",
@@ -32,23 +30,19 @@ def main():
     urls = []
     for i in cocoImageIds:
         cocoImg = coco.loadImgs(i)[0]
-        urls.append(cocoImg["coco_url"])
+        annIds = coco.getAnnIds(imgIds=cocoImg["id"], catIds=personCatID, iscrowd=None)
+        annotation = coco.loadAnns(annIds)[0]
+        if annotation["iscrowd"] == 0:
+            urls.append(cocoImg["coco_url"])
 
-    saveto = [os.path.join(cocoPath, os.path.basename(url))
-              for url in urls]
+    print("Enqueueing download of {} items".format(len(urls)))
+    dl = Downloader()
 
-    print("Starting download of {} items".format(len(urls)))
-    # Thank you to: https://github.com/shazow/workerpool/wiki/Mass-Downloader
-    pool = workerpool.WorkerPool(size=6)
+    for url in urls:
+        dl.enqueue_file(url, path=cocoPath)
 
-    # Perform the mapping
-    pool.map(urllib.request.urlretrieve, urls, saveto)
-
-    # Send shutdown jobs to all threads, and wait until all the jobs have been completed
-    pool.shutdown()
-    pool.wait()
-
-    print(cocoImg)
+    print("Downloading files...")
+    dl.download()
 
 
 if __name__ == '__main__':

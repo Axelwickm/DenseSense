@@ -131,6 +131,13 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         self.coco = COCO(annFile)
         self.personCatID = self.coco.getCatIds(catNms=['person'])[0]
         self.cocoImageIds = self.coco.getImgIds(catIds=self.personCatID)
+
+        def isNotCrowd(imgId):
+            annIds = self.coco.getAnnIds(imgIds=imgId, catIds=self.personCatID, iscrowd=False)
+            annotation = self.coco.loadAnns(annIds)[0]
+            return not annotation["iscrowd"]
+        
+        self.cocoImageIds = list(filter(isNotCrowd, self.cocoImageIds))
         self.cocoOnDisk = path.exists(self.cocoPath)
 
         print("Coco dataset size: {}".format(len(self.cocoImageIds)))
@@ -193,7 +200,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                 cocoImage, image = self._getCocoImage(i)
 
                 # Get annotation
-                annIds = self.coco.getAnnIds(imgIds=cocoImage["id"], catIds=self.personCatID, iscrowd=None)
+                annIds = self.coco.getAnnIds(imgIds=cocoImage["id"], catIds=self.personCatID, iscrowd=False)
                 annotation = self.coco.loadAnns(annIds)
 
                 # Draw each person in annotation to separate mask
@@ -202,11 +209,8 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                 for person in annotation:
                     mask = np.zeros(image.shape[0:2], dtype=np.uint8)
                     for s in person["segmentation"]:
-                        if s not in ["counts", "size"]:  # FIXME: why is s sometimes "counts"?
-                            s = np.reshape(np.array(s, dtype=np.int32), (-2, 2))
-                            cv2.fillPoly(mask, [s], 1)
-                        else:
-                            print(person["id"], "has", s)
+                        s = np.reshape(np.array(s, dtype=np.int32), (-2, 2))
+                        cv2.fillPoly(mask, [s], 1)
                     segs.append(mask)
                     bbox = person["bbox"]
                     seg_bounds.append(np.array([bbox[0], bbox[1], bbox[0] + bbox[2], bbox[1] + bbox[3]]))
