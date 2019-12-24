@@ -13,15 +13,17 @@ from detectron2.engine.defaults import DefaultPredictor
 
 # TODO: set these paths outside this file
 config_fpath = "./models/densepose_rcnn_R_50_FPN_s1x.yaml"
-model_fpath = "./models/R_50_FPN_s1x.pkl"
+model_fpath = "./models/DensePose_ResNet50_FPN_s1x.pkl"
 
 cfg = get_cfg()
 cfg.NUM_GPUS = 1
 add_densepose_config(cfg)
 cfg.merge_from_file(config_fpath)
 cfg.MODEL.WEIGHTS = model_fpath
-cfg.MODEL.DEVICE = "cpu"  # FIXME
+cfg.MODEL.DEVICE = 'cuda:0' if torch.cuda.is_available() else 'cpu'
 cfg.freeze()
+
+print("DensePose running on: ", cfg.MODEL.DEVICE)
 
 
 class DensePoseWrapper(Algorithm):
@@ -40,7 +42,7 @@ class DensePoseWrapper(Algorithm):
         # Do inference
         with torch.no_grad():
             process = psutil.Process(os.getpid())
-            print("Memory usage before DensePose: {0:.2f} GB".format(process.memory_info().rss / 1e9))
+            #print("Memory usage before DensePose: {0:.2f} GB".format(process.memory_info().rss / 1e9))
             ret = self.predictor(image)["instances"].to("cpu")
 
         # Do post processing and compile results into list

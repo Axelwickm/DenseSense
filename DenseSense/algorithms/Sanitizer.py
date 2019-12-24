@@ -198,6 +198,10 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Load instance of COCO dataset
                 cocoImage, image = self._getCocoImage(i)
+                if image is None:
+                    print("Image is None??? Skipping.", i)
+                    print(cocoImage)
+                    continue
 
                 # Get annotation
                 annIds = self.coco.getAnnIds(imgIds=cocoImage["id"], catIds=self.personCatID, iscrowd=False)
