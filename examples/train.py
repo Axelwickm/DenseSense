@@ -10,7 +10,7 @@ parser.add_argument("-e", "--epochs", help="How many epochs to train", default=5
 parser.add_argument("-p", "--print", help="How often per iteration to print update", default=40, type=int)
 parser.add_argument("-d", "--dataset", help="What dataset to train", type=str)
 parser.add_argument("-v", "--visualize", help="If training should be visualized with matplotlib", default=0, type=int)
-parser.add_argument("-t", "--tensorboard", help="If training should be logged with tensorboard", default=0, type=int)
+parser.add_argument("-t", "--tensorboard", help="If training should be logged with tensorboard", default="0", type=str)
 parser.add_argument("--lmdb", help="Whether to use LMDB database or not", default=1, type=int)
 
 
@@ -40,9 +40,15 @@ def main():
         if args.dataset is not None:
             dataset = args.dataset
 
+        try:
+            tb = int(args.tensorboard)
+            tb = True if 0 < tb else False
+        except ValueError:
+            tb = args.tensorboard
+
         sanitizer.train(epochs=args.epochs, dataset=dataset,
                         useDatabase=args.lmdb, printUpdateEvery=args.print,
-                        visualize=args.visualize, tensorboard=args.tensorboard)
+                        visualize=args.visualize, tensorboard=tb)
 
 
 if __name__ == '__main__':

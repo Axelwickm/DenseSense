@@ -190,10 +190,15 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         if not self._trainingInitiated:
             self._initTraining(dataset, useDatabase)
 
-        if tensorboard:
-            # from tensorboardX import SummaryWriter  # Seems to not close file properly
+        if tensorboard or type(tensorboard) == str:
             from torch.utils.tensorboard import SummaryWriter
-            writer = SummaryWriter("./data/tensorboard")
+            from PIL import Image
+
+            if type(tensorboard) == str:
+                writer = SummaryWriter("./data/tensorboard/"+tensorboard)
+            else:
+                writer = SummaryWriter("./data/tensorboard/")
+            tensorboard = True
 
             # dummy_input = torch.Tensor(5, 1, 56, 56)
             # writer.add_graph(self.maskGenerator, dummy_input)
@@ -201,21 +206,14 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
         Iterations = len(self.cocoImageIds)
 
-        # Unused
-        lossSizes = []
-        epochLossSizes = []
-
-        def printUpdate(loss, iteration, epoch):
-            lossSizes.append(loss/printUpdateEvery)
-            print("Iteration {} / {}, epoch {} / {}".format(iteration, Iterations, epoch, epochs))
-            print("Loss size: {}\n".format(lossSizes[-1]))
-            if tensorboard:
-                writer.add_scalar("Loss size", loss, iteration+epoch*Iterations)
+        meanPixels = []
 
         print("Starting training")
 
-        for currentEpoch in range(epochs):
+        for epoch in range(epochs):
             epochLoss = np.float64(0)
+            interestingImage = None
+            interestingMeasure = -100000
             for i in range(Iterations):
 
                 # Load instance of COCO dataset
@@ -259,6 +257,10 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
                 if len(self._ROI_masks) == 0:
                     continue
+
+                if tensorboard:
+                    means = [torch.mean(ROI).detach().numpy() for ROI in self._ROI_masks]
+                    meanPixels.append(sum(means)/len(means))
 
                 # Find overlaps between bboxes of segs and ROIs
                 overlaps, overlapLow, overlapHigh = self._overlappingMatrix(
@@ -347,7 +349,19 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
                 epochLoss += lossSize/Iterations
                 if (i-1) % printUpdateEvery == 0:
-                    printUpdate(lossSize, i, currentEpoch)
+                    print("Iteration {} / {}, epoch {} / {}".format(i, Iterations, epoch, epochs))
+                    print("Loss size: {}\n".format(lossSize / printUpdateEvery))
+                    if tensorboard:
+                        absI = i + epoch * Iterations
+                        writer.add_scalar("Loss size", lossSize, absI)
+                        writer.add_histogram("Mean ROI pixel value", np.array(meanPixels), absI)
+                        meanPixels = []
+
+                if tensorboard:
+                    interestingness = np.sum(self._overlappingROIsValues)
+                    if interestingMeasure < interestingness:
+                        interestingImage, shouldUpdate = self.renderDebug(image.copy())
+                        interestingMeasure = interestingness
 
                 # Show visualization
                 if visualize:
@@ -358,10 +372,13 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                         plt.draw()
                         plt.pause(4)
 
-            epochLossSizes.append(epochLoss)
-            print("Finished epoch {} / {}. Loss size:".format(currentEpoch, epochs, epochLoss))
+            print("Finished epoch {} / {}. Loss size:".format(epoch, epochs, epochLoss))
             if tensorboard:
-                writer.add_scalar("epoch loss size", Iterations*currentEpoch)
+                writer.add_scalar("epoch loss size", Iterations*epoch)
+                if interestingImage is not None:
+                    interestingImage = cv2.cvtColor(interestingImage, cv2.COLOR_BGR2RGB)
+                    interestingImage = torch.from_numpy(interestingImage).permute(2, 0, 1)
+                    writer.add_image("interesting image", interestingImage, Iterations*epoch)
             self.saveModel(self.modelPath)
 
         self._training = False
