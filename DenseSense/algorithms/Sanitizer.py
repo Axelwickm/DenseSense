@@ -83,7 +83,8 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             x = self.dconv3down(x)
 
             y = self.fc(b)
-            y = self.relu(y).view(-1, 1, 14, 14)
+            y = self.relu(y)
+            y = y.view(-1, 1, 14, 14)
             x = x + y
 
             x = self.upsample(x)
@@ -110,6 +111,8 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         self._trainingInitiated = False
         self._ROI_masks = torch.Tensor()
         self._ROI_bounds = np.array([])
+        self._overlappingROIs = np.array([])
+        self._overlappingROIsValues = np.array([])
 
     def loadModel(self, modelPath):
         self.modelPath = modelPath
@@ -156,7 +159,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             self.lmdb.verbose = True
 
         # Init loss function and optimizer
-        self.optimizer = torch.optim.Adam(self.maskGenerator.parameters(), lr=0.0003)
+        self.optimizer = torch.optim.Adadelta(self.maskGenerator.parameters(), lr=1.0)
 
         # Init DensePose extractor
         self.denseposeExtractor = DensePoseWrapper()
@@ -198,6 +201,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
         Iterations = len(self.cocoImageIds)
 
+        # Unused
         lossSizes = []
         epochLossSizes = []
 
@@ -216,7 +220,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Load instance of COCO dataset
                 cocoImage, image = self._getCocoImage(i)
-                if image is None:
+                if image is None: # FIXME
                     print("Image is None??? Skipping.", i)
                     print(cocoImage)
                     continue
@@ -252,8 +256,6 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Run prediction
                 self._generateMasks(ROIs)
-                if visualize:
-                    image = self.renderDebug(image)
 
                 if len(self._ROI_masks) == 0:
                     continue
@@ -270,14 +272,9 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Get average value where there is overlap between COCO-mask for each person and predictions for
                 contentAverage = {}
-                for a, b in overlapsInds:
+                for a, b in overlapsInds:  # For every overlap
                     xCoords = np.array([overlapLow[0][a, b], overlapHigh[0][a, b]])
                     yCoords = np.array([overlapLow[1][a, b], overlapHigh[1][a, b]])
-
-                    if visualize:
-                        cv2.rectangle(image, (xCoords[0], yCoords[0],
-                                              xCoords[1] - xCoords[0], yCoords[1] - yCoords[0]),
-                                      (200, 100, 100), 2)
 
                     # ROI transformed overlap area
                     ROI_xCoords = (xCoords - self._ROI_bounds[a][0]) / (self._ROI_bounds[a][2] - self._ROI_bounds[a][0])
@@ -298,34 +295,48 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
                     # Calculate sum of product of the ROI mask and segment overlap
                     segOverlap = torch.from_numpy(segOverlap).to(device)
-                    avgVariable = torch.mean(ROI_mask * segOverlap)
-                    avgNegVariable = torch.mean((1 - ROI_mask) * segOverlap)
+                    avgVariable = torch.sum(ROI_mask * segOverlap)
+                    avgNegVariable = torch.sum((1 - ROI_mask) * segOverlap)
+                    # print("        avgVar", ((ROI_mask * segOverlap).detach().numpy()))
+                    # print("        mean", avgVariable.detach().numpy())
+                    # print("       -avgVar", (((1 - ROI_mask) * segOverlap).detach().numpy()))
+                    # print("       -mean", avgNegVariable.detach().numpy())
+                    # print("meanROI", torch.mean(ROI_mask).detach().numpy())
 
                     # Store this sum
-                    if a not in contentAverage:
-                        contentAverage[a] = []
-                        contentAverage[-a] = []
+                    if str(a) not in contentAverage:
+                        contentAverage[str(a)] = []
+                        contentAverage["n"+str(a)] = []
 
-                    contentAverage[a].append(avgVariable)
-                    contentAverage[-a].append(avgNegVariable)
+                    contentAverage[str(a)].append(avgVariable)
+                    contentAverage["n"+str(a)].append(avgNegVariable)
 
                 # Choose whether to maximize a or -a
-                consideredROIs = np.unique(overlapsInds[:, 0])
-                lossTensor = []
-                for a in consideredROIs:
-                    # Choose the two segments which gives the most content
-                    A = np.array([float(x.cpu()) for x in contentAverage[a]])
-                    AN = np.array([float(x.cpu()) for x in contentAverage[-a]])
-                    matrix = A[:] + AN[:, None]
-                    matrix *= 1 - 5 * np.identity(AN.shape[0])
-                    aMax = np.unravel_index(matrix.argmax(), matrix.shape)
+                self._overlappingROIs = np.unique(overlapsInds[:, 0])
+                self._overlappingROIsValues = np.zeros((self._overlappingROIs.shape[0], 2))
 
+                lossTensor = []
+                for j in range(len(self._overlappingROIs)):  # For every ROI with overlap
+                    a = self._overlappingROIs[j]
+
+                    A = np.array([float(x.cpu()) for x in contentAverage[str(a)]])
+                    AN = np.array([float(x.cpu()) for x in contentAverage["n"+str(a)]])
+                    matrix = A[:] + AN[:, None]
+                    matrix *= 1 - 10 * np.identity(AN.shape[0])
+                    # Choose the two segments which gives the most content
+                    aMax = np.unravel_index(matrix.argmax(), matrix.shape)
                     # Add to loss tensor
+                    val0 = contentAverage[str(a)][aMax[0]]
+                    val1 = contentAverage["n"+str(a)][aMax[1]]
+
                     if aMax[0] == aMax[1]:
-                        s = contentAverage[a][aMax[0]]
+                        s = val0
+                        self._overlappingROIsValues[j] = np.array([-val0, -val0])
                     else:
-                        s = contentAverage[a][aMax[0]] + contentAverage[-a][aMax[1]]
-                    lossTensor.append(1.0 / (s + 4))  # TODO: better loss function
+                        s = val0 + val1
+                        self._overlappingROIsValues[j] = np.array([val0, val1])
+
+                    lossTensor.append(1.0 / (s + 4))  # TODO: better loss function?
 
                 # Modify weights
                 lossSize = torch.stack(lossTensor).sum()
@@ -340,11 +351,12 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Show visualization
                 if visualize:
-                    plt.ion()
-                    plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-                    plt.draw()
-                    plt.pause(0.001)
-                    print("\n")
+                    image, shouldUpdate = self.renderDebug(image)
+                    if shouldUpdate:
+                        plt.ion()
+                        plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                        plt.draw()
+                        plt.pause(4)
 
             epochLossSizes.append(epochLoss)
             print("Finished epoch {} / {}. Loss size:".format(currentEpoch, epochs, epochLoss))
@@ -371,29 +383,47 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         # Normalize ROIs from (0, 1) to (0, 255)
         ROIsMaskNorm = self._ROI_masks * 255
 
+        # Overlay opacity
+        alpha = 0.5
+
         # Render masks on image
+        threshold = 0.05
+        shouldUpdate = False
         for i in range(len(self._ROI_masks)):
+            if self._training: # FIXME: this should happen for pure inference as well
+                # Render only if mask is separating two people
+                index = np.where(i == self._overlappingROIs)
+                if len(index[0]) != 0:
+                    index = index[0][0]
+                    if self._overlappingROIsValues[index][0] < threshold or \
+                            self._overlappingROIsValues[index][1] < threshold:
+                        alpha *= -1.0
+                    else:
+                        shouldUpdate = True
+
             mask = ROIsMaskNorm[i, 0].cpu().detach().to(torch.uint8).numpy()
             bnds = self._ROI_bounds[i]
 
             raw = self._ROI_masks.cpu().detach().numpy()
 
             # Change colors of mask
-            mask = cv2.normalize(mask, None, 0, 255, cv2.NORM_MINMAX)
-            mask = cv2.applyColorMap(mask, cv2.COLORMAP_SUMMER)
-
+            mask = cv2.normalize(mask, None, 0, 255, cv2.NORM_MINMAX) # FIXME: supposed to not be needed
+            if 0 < alpha:
+                mask = cv2.applyColorMap(mask, cv2.COLORMAP_SUMMER)
+            else:
+                alpha = -alpha
+                mask = cv2.applyColorMap(mask, cv2.COLORMAP_PINK)
             # TODO: render contours instead?
             # Resize mask to bounds
             dims = (bnds[2] - bnds[0], bnds[3] - bnds[1])
             mask = cv2.resize(mask, dims, interpolation=cv2.INTER_AREA)
 
             # Overlay image
-            alpha = 0.5
             overlap = image[bnds[1]:bnds[3], bnds[0]:bnds[2]]
             mask = mask * alpha + overlap * (1.0 - alpha)
             image[bnds[1]:bnds[3], bnds[0]:bnds[2]] = mask
 
-        return image
+        return image, shouldUpdate
 
     def _getCocoImage(self, index):
         if self.cocoOnDisk:
