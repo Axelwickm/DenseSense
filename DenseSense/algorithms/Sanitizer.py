@@ -127,7 +127,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         print("Saving Sanitizer MaskGenerator model to: "+self.modelPath)
         torch.save(self.maskGenerator.state_dict(), self.modelPath)
 
-    def _initTraining(self, dataset, useDatabase):
+    def _initTraining(self, learningRate, dataset, useDatabase):
         # Dataset is COCO
         print("Initiating training of Sanitizer MaskGenerator")
         print("Loading COCO")
@@ -159,7 +159,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             self.lmdb.verbose = True
 
         # Init loss function and optimizer
-        self.optimizer = torch.optim.Adadelta(self.maskGenerator.parameters(), lr=1.0)
+        self.optimizer = torch.optim.Adam(self.maskGenerator.parameters(), lr=learningRate)
 
         # Init DensePose extractor
         self.denseposeExtractor = DensePoseWrapper()
@@ -182,13 +182,13 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         for i in range(len(ROIs)):
             self._ROI_bounds[i] = np.array(ROIs[i].bounds, dtype=np.int32)
 
-    def train(self, epochs=100, dataset="Coco",
+    def train(self, epochs=100, learningRate=0.05, dataset="Coco",
               useDatabase=True, printUpdateEvery=40,
               visualize=False, tensorboard=False):
 
         self._training = True
         if not self._trainingInitiated:
-            self._initTraining(dataset, useDatabase)
+            self._initTraining(learningRate, dataset, useDatabase)
 
         if tensorboard or type(tensorboard) == str:
             from torch.utils.tensorboard import SummaryWriter
@@ -259,7 +259,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                     continue
 
                 if tensorboard:
-                    means = [torch.mean(ROI).detach().numpy() for ROI in self._ROI_masks]
+                    means = [torch.mean(ROI).detach().cpu().numpy() for ROI in self._ROI_masks]
                     meanPixels.append(sum(means)/len(means))
 
                 # Find overlaps between bboxes of segs and ROIs
@@ -341,7 +341,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                     lossTensor.append(1.0 / (s + 4))  # TODO: better loss function?
 
                 # Modify weights
-                lossSize = torch.stack(lossTensor).sum()
+                lossSize = torch.stack(lossTensor).mean()
                 lossSize.backward()
                 self.optimizer.step()
                 self.optimizer.zero_grad()
