@@ -374,7 +374,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
             print("Finished epoch {} / {}. Loss size:".format(epoch, epochs, epochLoss))
             if tensorboard:
-                writer.add_scalar("epoch loss size", Iterations*epoch)
+                writer.add_scalar("epoch loss size", epochLoss, Iterations*epoch)
                 if interestingImage is not None:
                     interestingImage = cv2.cvtColor(interestingImage, cv2.COLOR_BGR2RGB)
                     interestingImage = torch.from_numpy(interestingImage).permute(2, 0, 1)
