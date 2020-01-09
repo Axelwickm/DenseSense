@@ -17,34 +17,36 @@ print("Sanitizer running on: " + str(device))
 
 
 class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
+
     # UNet, inspired by https://github.com/usuyama/pytorch-unet/
+    # But with a fully connected layer in the middle
     class MaskGenerator(nn.Module):
         def __init__(self):
             super(Sanitizer.MaskGenerator, self).__init__()
 
-            def double_conv(in_channels, out_channels):
-                return nn.Sequential(
-                    nn.Conv2d(in_channels, out_channels, 3, padding=1),
-                    nn.ReLU(inplace=True),
-                    nn.Conv2d(out_channels, out_channels, 3, padding=1),
-                    nn.ReLU(inplace=True)
-                )
+            self.dconv1 = nn.Sequential(
+                nn.Conv2d(1, 8, 3, padding=2),
+                nn.LeakyReLU(inplace=True),
+            )
 
-            self.dconv1down = double_conv(1, 8)
-            self.dconv2down = double_conv(8, 16)
-            self.dconv3down = double_conv(16, 32)
+            self.dconv2 = nn.Sequential(
+                nn.Conv2d(8, 4, 3, padding=1),
+                nn.LeakyReLU(inplace=True),
+            )
+
+            self.dconv3 = nn.Sequential(
+                nn.Conv2d(3, 1, 3, padding=1),
+                nn.LeakyReLU(inplace=True),
+            )
+
+            self.fcImg = nn.Linear(14*14*2+2, 14*14)
 
             self.maxpool = nn.MaxPool2d(2)
-            self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-            self.fc = nn.Linear(2, 14 * 14)
-            self.relu = nn.ReLU()
-
-            self.dconvup2 = double_conv(16 + 32, 16)
-            self.dconvup1 = double_conv(8 + 16, 8)
-
-            self.conv_last = nn.Conv2d(8, 1, 1)
+            self.upsample1 = nn.Upsample(size=(29, 29), mode="bilinear")
+            self.upsample2 = nn.Upsample(size=(56, 56), mode="bilinear")
 
             self.sigmoid = nn.Sigmoid()
+            self.leakyReLU = nn.LeakyReLU()
 
         def forward(self, people):
             if len(people) == 0:
@@ -70,40 +72,36 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
             x = x.to(device)
             b = b.to(device)
+            batchSize = x.shape[0]
 
             # Normalize input
-            x[0 < x] = x[0 < x] / 15.0 * 0.5 + 0.5
+            x[0 < x] = x[0 < x] / 15.0 * 0.2 + 0.8
 
-            # Run model
-            conv1 = self.dconv1down(x)
-            x = self.maxpool(conv1)
-            conv2 = self.dconv2down(x)
-            x = self.maxpool(conv2)
+            # Convolutions
+            x = self.dconv1(x)  # 1 -> 8, 56x56 -> 58x58
+            x = self.maxpool(x)     # 58x58 -> 29x29
+            conv = self.dconv2(x)  # 8 -> 4
+            x = self.maxpool(conv[:, :2])     # 29x29 -> 14x14
 
-            x = self.dconv3down(x)
+            # Fully connected layer
+            x = x.view(batchSize, 14*14*2)
+            x = torch.cat([x, b], dim=1)  # Image and bbox info
+            x = self.fcImg(x)
+            x = self.leakyReLU(x)
+            x = x.view(batchSize, 1, 14, 14)
 
-            y = self.fc(b)
-            y = self.relu(y)
-            y = y.view(-1, 1, 14, 14)
-            x = x + y
+            # Merge fully connected with past convolution calculation
+            x = self.upsample1(x)  # 14x14 -> 29x29
+            x = torch.cat([x, conv[:, 2:]], dim=1)
+            x = self.dconv3(x)     # 3 -> 1
+            x = self.upsample2(x)  # 29x29 -> 56x56
 
-            x = self.upsample(x)
-            x = torch.cat([x, conv2], dim=1)
-
-            x = self.dconvup2(x)
-            x = self.upsample(x)
-            x = torch.cat([x, conv1], dim=1)
-
-            x = self.dconvup1(x)
-            x = self.conv_last(x)
-            out = self.sigmoid(x)
-
-            return out
+            return x
 
     def __init__(self):
         super().__init__()
 
-        # Generate and maybe load mask generator model
+        # Generate and maybe load mask generator model()
         self.maskGenerator = Sanitizer.MaskGenerator()
         self.modelPath = None
 
@@ -156,10 +154,11 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         # Init LMDB_helper
         if useDatabase:
             self.lmdb = LMDBHelper("a")
-            self.lmdb.verbose = True
+            self.lmdb.verbose = False
 
         # Init loss function and optimizer
-        self.optimizer = torch.optim.Adam(self.maskGenerator.parameters(), lr=learningRate)
+        self.optimizer = torch.optim.Adam(self.maskGenerator.parameters(), lr=learningRate, amsgrad=True)
+        self.lossFunction = torch.nn.MSELoss()
 
         # Init DensePose extractor
         self.denseposeExtractor = DensePoseWrapper()
@@ -182,7 +181,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         for i in range(len(ROIs)):
             self._ROI_bounds[i] = np.array(ROIs[i].bounds, dtype=np.int32)
 
-    def train(self, epochs=100, learningRate=0.05, dataset="Coco",
+    def train(self, epochs=100, learningRate=0.005, dataset="Coco",
               useDatabase=True, printUpdateEvery=40,
               visualize=False, tensorboard=False):
 
@@ -192,7 +191,6 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
         if tensorboard or type(tensorboard) == str:
             from torch.utils.tensorboard import SummaryWriter
-            from PIL import Image
 
             if type(tensorboard) == str:
                 writer = SummaryWriter("./data/tensorboard/"+tensorboard)
@@ -218,7 +216,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Load instance of COCO dataset
                 cocoImage, image = self._getCocoImage(i)
-                if image is None: # FIXME
+                if image is None:  # FIXME
                     print("Image is None??? Skipping.", i)
                     print(cocoImage)
                     continue
@@ -296,52 +294,32 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                                             interpolation=cv2.INTER_AREA)
 
                     # Calculate sum of product of the ROI mask and segment overlap
-                    segOverlap = torch.from_numpy(segOverlap).to(device)
+                    segOverlap = torch.from_numpy(segOverlap).float().to(device)
                     avgVariable = torch.sum(ROI_mask * segOverlap)
-                    avgNegVariable = torch.sum((1 - ROI_mask) * segOverlap)
-                    # print("        avgVar", ((ROI_mask * segOverlap).detach().numpy()))
-                    # print("        mean", avgVariable.detach().numpy())
-                    # print("       -avgVar", (((1 - ROI_mask) * segOverlap).detach().numpy()))
-                    # print("       -mean", avgNegVariable.detach().numpy())
-                    # print("meanROI", torch.mean(ROI_mask).detach().numpy())
 
                     # Store this sum
                     if str(a) not in contentAverage:
                         contentAverage[str(a)] = []
-                        contentAverage["n"+str(a)] = []
 
-                    contentAverage[str(a)].append(avgVariable)
-                    contentAverage["n"+str(a)].append(avgNegVariable)
+                    contentAverage[str(a)].append((avgVariable, segOverlap, ROI_mask))
 
-                # Choose whether to maximize a or -a
                 self._overlappingROIs = np.unique(overlapsInds[:, 0])
-                self._overlappingROIsValues = np.zeros((self._overlappingROIs.shape[0], 2))
 
-                lossTensor = []
+                # Choose which segment each ROI should be compared with
+                losses = []
                 for j in range(len(self._overlappingROIs)):  # For every ROI with overlap
                     a = self._overlappingROIs[j]
 
-                    A = np.array([float(x.cpu()) for x in contentAverage[str(a)]])
-                    AN = np.array([float(x.cpu()) for x in contentAverage["n"+str(a)]])
-                    matrix = A[:] + AN[:, None]
-                    matrix *= 1 - 10 * np.identity(AN.shape[0])
-                    # Choose the two segments which gives the most content
-                    aMax = np.unravel_index(matrix.argmax(), matrix.shape)
-                    # Add to loss tensor
-                    val0 = contentAverage[str(a)][aMax[0]]
-                    val1 = contentAverage["n"+str(a)][aMax[1]]
+                    AL = list(contentAverage[str(a)])
+                    AV = np.array([float(x[0].cpu()) for x in AL])
 
-                    if aMax[0] == aMax[1]:
-                        s = val0
-                        self._overlappingROIsValues[j] = np.array([-val0, -val0])
-                    else:
-                        s = val0 + val1
-                        self._overlappingROIsValues[j] = np.array([val0, val1])
-
-                    lossTensor.append(1.0 / (s + 4))  # TODO: better loss function?
+                    ind = AV.argmax()
+                    lossSize = self.lossFunction(AL[ind][2], AL[ind][1])
+                    losses.append(lossSize)
 
                 # Modify weights
-                lossSize = torch.stack(lossTensor).mean()
+                losses = torch.stack(losses)
+                lossSize = torch.sum(losses)
                 lossSize.backward()
                 self.optimizer.step()
                 self.optimizer.zero_grad()
@@ -358,19 +336,18 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                         meanPixels = []
 
                 if tensorboard:
-                    interestingness = np.sum(self._overlappingROIsValues)
+                    interestingness = np.random.random()  # just choose a random one
                     if interestingMeasure < interestingness:
                         interestingImage, shouldUpdate = self.renderDebug(image.copy())
                         interestingMeasure = interestingness
 
                 # Show visualization
                 if visualize:
-                    image, shouldUpdate = self.renderDebug(image)
-                    if shouldUpdate:
-                        plt.ion()
-                        plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-                        plt.draw()
-                        plt.pause(4)
+                    image = self.renderDebug(image)
+                    plt.ion()
+                    plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+                    plt.draw()
+                    plt.pause(4)
 
             print("Finished epoch {} / {}. Loss size:".format(epoch, epochs, epochLoss))
             if tensorboard:
@@ -396,41 +373,24 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         overlappingMask = np.logical_and((0 < xo), (0 < yo))
         return overlappingMask, (xo_low, yo_low), (xo_low + xo, yo_low + yo)
 
-    def renderDebug(self, image):
+    def renderDebug(self, image, alpha=0.55):
         # Normalize ROIs from (0, 1) to (0, 255)
         ROIsMaskNorm = self._ROI_masks * 255
 
-        # Overlay opacity
-        alpha = 0.5
-
         # Render masks on image
-        threshold = 0.05
-        shouldUpdate = False
         for i in range(len(self._ROI_masks)):
-            if self._training: # FIXME: this should happen for pure inference as well
-                # Render only if mask is separating two people
-                index = np.where(i == self._overlappingROIs)
-                if len(index[0]) != 0:
-                    index = index[0][0]
-                    if self._overlappingROIsValues[index][0] < threshold or \
-                            self._overlappingROIsValues[index][1] < threshold:
-                        alpha *= -1.0
-                    else:
-                        shouldUpdate = True
-
             mask = ROIsMaskNorm[i, 0].cpu().detach().to(torch.uint8).numpy()
             bnds = self._ROI_bounds[i]
 
-            raw = self._ROI_masks.cpu().detach().numpy()
-
             # Change colors of mask
-            mask = cv2.normalize(mask, None, 0, 255, cv2.NORM_MINMAX) # FIXME: supposed to not be needed
             if 0 < alpha:
                 mask = cv2.applyColorMap(mask, cv2.COLORMAP_SUMMER)
             else:
                 alpha = -alpha
                 mask = cv2.applyColorMap(mask, cv2.COLORMAP_PINK)
+
             # TODO: render contours instead?
+
             # Resize mask to bounds
             dims = (bnds[2] - bnds[0], bnds[3] - bnds[1])
             mask = cv2.resize(mask, dims, interpolation=cv2.INTER_AREA)
@@ -440,7 +400,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             mask = mask * alpha + overlap * (1.0 - alpha)
             image[bnds[1]:bnds[3], bnds[0]:bnds[2]] = mask
 
-        return image, shouldUpdate
+        return image
 
     def _getCocoImage(self, index):
         if self.cocoOnDisk:
