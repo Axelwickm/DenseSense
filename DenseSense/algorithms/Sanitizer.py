@@ -1,3 +1,5 @@
+import time
+
 import DenseSense.algorithms.Algorithm
 from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
 from DenseSense.utils.LMDBHelper import LMDBHelper
@@ -8,6 +10,7 @@ import numpy as np
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -50,31 +53,28 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
         def forward(self, people):
             if len(people) == 0:
-                return np.array([])
+                return np.array([]), torch.Tensor([]).to(device)
 
-            if not isinstance(people, torch.Tensor):
-                # Send data to device
-                x = torch.Tensor(len(people), 1, 56, 56)
-                b = torch.Tensor(len(people), 2)
-                for i in range(len(people)):
-                    person = people[i]
-                    x[i][0] = torch.from_numpy(person.S)
-                    bnds = person.bounds
-                    area = np.power(np.sqrt((bnds[2] - bnds[0]) * (bnds[3] - bnds[1])), 0.2)
-                    if bnds[3] == bnds[1]:
-                        aspect = 0
-                    else:
-                        aspect = (bnds[2] - bnds[0]) / (bnds[3] - bnds[1])
-                    b[i] = torch.Tensor([area, aspect])
-            else:
-                x = people
-                b = torch.ones(people.shape[0], 2)
+            # Send data to device
+            S = torch.Tensor(len(people), 1, 56, 56)
+            b = torch.Tensor(len(people), 2)
+            for i in range(len(people)):
+                person = people[i]
+                S[i][0] = torch.from_numpy(person.S)
+                bnds = person.bounds
+                area = np.power(np.sqrt((bnds[2] - bnds[0]) * (bnds[3] - bnds[1])), 0.2)
+                if bnds[3] == bnds[1]:
+                    aspect = 0
+                else:
+                    aspect = (bnds[2] - bnds[0]) / (bnds[3] - bnds[1])
+                b[i] = torch.Tensor([area, aspect])
 
-            x = x.to(device)
+            S = S.to(device)
             b = b.to(device)
-            batchSize = x.shape[0]
+            batchSize = S.shape[0]
 
             # Normalize input
+            x = S.clone()
             x[0 < x] = x[0 < x] / 15.0 * 0.2 + 0.8
 
             # Convolutions
@@ -94,9 +94,10 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             x = self.upsample1(x)  # 14x14 -> 29x29
             x = torch.cat([x, conv[:, 2:]], dim=1)
             x = self.dconv3(x)     # 3 -> 1
+            x = self.sigmoid(x)
             x = self.upsample2(x)  # 29x29 -> 56x56
 
-            return x
+            return x, S
 
     def __init__(self):
         super().__init__()
@@ -108,6 +109,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         self._training = False
         self._trainingInitiated = False
         self._ROI_masks = torch.Tensor()
+        self._ROIs = torch.Tensor()
         self._ROI_bounds = np.array([])
         self._overlappingROIs = np.array([])
         self._overlappingROIsValues = np.array([])
@@ -165,21 +167,106 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
     def extract(self, people):
         # Generate masks for all ROIs (people) using neural network model
-        self._generateMasks(people)
+        with torch.no_grad():
+            self._generateMasks(people)
 
-        # TODO: merge masks and negated masks with segmentation mask from DensePose
+            if len(self._ROI_masks) == 0:
+                return people
 
-        # TODO: find overlapping ROIs and merge the ones where the masks correlate
+            # Multiply masks with with segmentation mask from DensePose
+            masked = self._ROI_masks*self._ROIs
 
-        # TODO: filter people and update their data
+            # Find overlapping ROIs
+            overlaps, overlapLow, overlapHigh = self._overlappingMatrix(
+                self._ROI_bounds.astype(np.int32),
+                self._ROI_bounds.astype(np.int32)
+            )
+            overlaps[np.triu_indices(overlaps.shape[0])] = False
+            overlapsInds = np.array(list(zip(*np.where(overlaps))))
+            overlapsCorr = np.full_like(overlaps, 0, dtype=np.float)
 
-        return people
+            if overlapsInds.shape[0] != 0:
+                for a, b in overlapsInds:  # For every overlap
+                    # Extract part that overlaps from mask and make sizes match to smallest dim
+                    xCoords = np.array([overlapLow[0][a, b], overlapHigh[0][a, b]])
+                    yCoords = np.array([overlapLow[1][a, b], overlapHigh[1][a, b]])
+                    aMask = self._getTransformedROI(masked[a, 0], self._ROI_bounds[a], xCoords, yCoords)
+                    bMask = self._getTransformedROI(masked[b, 0], self._ROI_bounds[b], xCoords, yCoords)
+                    aArea = aMask.shape[0]*aMask.shape[1]
+                    bArea = bMask.shape[0]*bMask.shape[1]
+                    if aArea < bArea:
+                        bMask = bMask.unsqueeze(0)
+                        bMask = F.adaptive_avg_pool2d(bMask, aMask.shape)[0]
+                    elif bArea < aArea:
+                        aMask = aMask.unsqueeze(0)
+                        aMask = F.adaptive_avg_pool2d(aMask, bMask.shape)[0]
 
-    def _generateMasks(self, ROIs):
-        self._ROI_masks = self.maskGenerator.forward(ROIs)
-        self._ROI_bounds = np.zeros((len(ROIs), 4), dtype=np.int32)
-        for i in range(len(ROIs)):
-            self._ROI_bounds[i] = np.array(ROIs[i].bounds, dtype=np.int32)
+                    # Calculate correlation
+                    aMean = aMask.mean()
+                    bMean = bMask.mean()
+                    correlation = torch.sum((aMask-aMean)*(bMask-bMean))/(aMask.shape[0]*aMask.shape[1]-1)
+                    overlapsCorr[a, b] = correlation
+
+            # Find best disjoint sets of overlapping ROIs
+            threshold = 0.06  # Must be above 0
+
+            goodCorrelations = np.argwhere(threshold < overlapsCorr)
+            sortedCorrelations = overlapsCorr[goodCorrelations[:, 0], goodCorrelations[:, 1]].argsort()
+            goodCorrelations = goodCorrelations[sortedCorrelations]
+            overlapsCorr += overlapsCorr.T
+            coupled = {}
+
+            def getBiPotential(a, diff):
+                potential = 0
+                for bOther in np.argwhere(overlapsCorr[diff] != 0):
+                    bOther = bOther[0]
+                    if bOther in coupled[a][0]:
+                        potential += overlapsCorr[a, bOther]
+                return potential
+
+            for a, b in goodCorrelations:
+                aIn = a in coupled
+                bIn = b in coupled
+                if aIn:
+                    if bIn:
+                        potential = overlapsCorr[a, b]
+                        for diff in coupled[b][0]:
+                            potential += getBiPotential(a, diff)
+                        if 0 < potential:
+                            coupled[a][0].update(coupled[b][0])
+                            for diff in coupled[b][0]:
+                                coupled[diff] = coupled[a]
+                                coupled[a][1] += potential
+                    else:
+                        potential = overlapsCorr[a, b] + getBiPotential(a, b)
+                        if 0 < potential:
+                            coupled[a][0].add(b)
+                            coupled[a][1] += potential
+                            coupled[b] = coupled[a]
+                elif bIn:
+                    potential = overlapsCorr[b, a] + getBiPotential(b, a)
+                    if 0 < potential:
+                        coupled[b][0].add(a)
+                        coupled[b][1] += potential
+                        coupled[a] = coupled[b]
+                else:
+                    n = [{a, b}, overlapsCorr[a, b]]
+                    coupled[a] = n
+                    coupled[b] = n
+
+            newPeople = []
+
+            # Update all people data their data
+            while len(coupled) != 0:
+                instance = next(iter(coupled))
+                instances = list(coupled[instance][0])
+                for i in instances:
+                    del coupled[i]
+                instances = list(map(lambda i: people[i], instances))
+                instances[0].merge(instances[1:])
+                newPeople.append(instances[0])
+
+            return newPeople
 
     def train(self, epochs=100, learningRate=0.005, dataset="Coco",
               useDatabase=True, printUpdateEvery=40,
@@ -275,16 +362,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                 for a, b in overlapsInds:  # For every overlap
                     xCoords = np.array([overlapLow[0][a, b], overlapHigh[0][a, b]])
                     yCoords = np.array([overlapLow[1][a, b], overlapHigh[1][a, b]])
-
-                    # ROI transformed overlap area
-                    ROI_xCoords = (xCoords - self._ROI_bounds[a][0]) / (self._ROI_bounds[a][2] - self._ROI_bounds[a][0])
-                    ROI_xCoords = (ROI_xCoords * 56).astype(np.int32)
-                    ROI_xCoords[1] += ROI_xCoords[0] == ROI_xCoords[1]
-                    ROI_yCoords = (yCoords - self._ROI_bounds[a][1]) / (self._ROI_bounds[a][3] - self._ROI_bounds[a][1])
-                    ROI_yCoords = (ROI_yCoords * 56).astype(np.int32)
-                    ROI_yCoords[1] += ROI_yCoords[0] == ROI_yCoords[1]
-
-                    ROI_mask = self._ROI_masks[a, 0][ROI_yCoords[0]:ROI_yCoords[1], ROI_xCoords[0]:ROI_xCoords[1]]
+                    ROI_mask = self._getTransformedROI(self._ROI_masks[a, 0], self._ROI_bounds[a], xCoords, yCoords)
 
                     # Segmentation overlap area
                     segOverlap = segs[b][yCoords[0]:yCoords[1], xCoords[0]:xCoords[1]]
@@ -338,7 +416,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                 if tensorboard:
                     interestingness = np.random.random()  # just choose a random one
                     if interestingMeasure < interestingness:
-                        interestingImage, shouldUpdate = self.renderDebug(image.copy())
+                        interestingImage = self.renderDebug(image.copy())
                         interestingMeasure = interestingness
 
                 # Show visualization
@@ -360,6 +438,23 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
         self._training = False
 
+    def _generateMasks(self, ROIs):
+        self._ROI_masks, self._ROIs = self.maskGenerator.forward(ROIs)
+        self._ROIs[self._ROIs != 0] = 1
+        self._ROI_bounds = np.zeros((len(ROIs), 4), dtype=np.int32)
+        for i in range(len(ROIs)):
+            self._ROI_bounds[i] = np.array(ROIs[i].bounds, dtype=np.int32)
+            ROIs[i].A = torch.round(self._ROI_masks[i, 0]).cpu().numpy()
+
+    def _getCocoImage(self, index):
+        if self.cocoOnDisk:
+            # Load image from disk
+            cocoImage = self.coco.loadImgs(self.cocoImageIds[index])[0]
+            image = cv2.imread(self.cocoPath + "/" + cocoImage["file_name"])
+            return cocoImage, image
+        else:
+            raise FileNotFoundError("COCO image cant be found on disk")
+
     @staticmethod
     def _overlappingMatrix(a, b):
         xo_high = np.minimum(a[:, 2], b[:, None, 2])
@@ -372,6 +467,20 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
         overlappingMask = np.logical_and((0 < xo), (0 < yo))
         return overlappingMask, (xo_low, yo_low), (xo_low + xo, yo_low + yo)
+
+    @staticmethod
+    def _getTransformedROI(ROI, bounds, xCoords, yCoords):
+        # ROI transformed overlap area
+        ROI_xCoords = (xCoords -bounds[0]) / (bounds[2] - bounds[0])
+        ROI_xCoords = (ROI_xCoords * 56).astype(np.int32)
+        ROI_xCoords[1] += ROI_xCoords[0] == ROI_xCoords[1]
+        ROI_yCoords = (yCoords - bounds[1]) / (bounds[3] - bounds[1])
+        ROI_yCoords = (ROI_yCoords * 56).astype(np.int32)
+        ROI_yCoords[1] += ROI_yCoords[0] == ROI_yCoords[1]
+
+        ROI_mask = ROI[ROI_yCoords[0]:ROI_yCoords[1], ROI_xCoords[0]:ROI_xCoords[1]]
+
+        return ROI_mask
 
     def renderDebug(self, image, alpha=0.55):
         # Normalize ROIs from (0, 1) to (0, 255)
@@ -401,12 +510,3 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             image[bnds[1]:bnds[3], bnds[0]:bnds[2]] = mask
 
         return image
-
-    def _getCocoImage(self, index):
-        if self.cocoOnDisk:
-            # Load image from disk
-            cocoImage = self.coco.loadImgs(self.cocoImageIds[index])[0]
-            image = cv2.imread(self.cocoPath + "/" + cocoImage["file_name"])
-            return cocoImage, image
-        else:
-            raise FileNotFoundError("COCO image cant be found on disk")

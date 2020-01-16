@@ -10,7 +10,7 @@ import numpy as np
 
 from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
 from DenseSense.algorithms.Sanitizer import Sanitizer
-#from DenseSense.algorithms.Tracker import Tracker
+from DenseSense.algorithms.Tracker import Tracker
 #from DenseSense.algorithms.uv_extractor import UVMapper
 
 
@@ -29,7 +29,8 @@ def main():
 
     densepose = DensePoseWrapper()
     sanitizer = Sanitizer()
-    #tracker = Tracker()
+    sanitizer.loadModel("./models/Sanitizer.pth")
+    tracker = Tracker()
     #uvMapper =  UVMapper()
 
     while True:
@@ -47,11 +48,11 @@ def main():
 
         # Refine DensePose output to get actual people
         people = sanitizer.extract(people)
-        debugImage = sanitizer.renderDebug(debugImage)
+        debugImage = sanitizer.renderDebug(debugImage, alpha=0.2)
 
         # Track the people (which modifies the people variables)
-        #tracker.extract(people, True)
-        #debugImage = tracker.renderDebug(debugImage, people)
+        tracker.extract(people, True)
+        debugImage = tracker.renderDebug(debugImage, people)
 
         # Extact UV map for each person
         #uvs = uvMapper.extract(people, mergedIUVs, image)
