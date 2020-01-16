@@ -22,9 +22,6 @@ class Person(object):
         self.U = None      # U mapping for each body part
         self.V = None      # V mapping for each body part
 
-        self.S_ind = None  # The most activated segmentation ( or background) for each pixel
-        self.I_ind = None  # The most activated body part ( or background) for each pixel
-
         self.A = None      # Alpha channel or mask to be applied to data
 
     def become(self, otherInstance):
@@ -33,9 +30,6 @@ class Person(object):
         self.I = otherInstance.I
         self.U = otherInstance.U
         self.V = otherInstance.V
-
-        self.S_ind = otherInstance.S_ind
-        self.I_ind = otherInstance.I_ind
 
         self.attrs.update(otherInstance.attrs)
         return self
