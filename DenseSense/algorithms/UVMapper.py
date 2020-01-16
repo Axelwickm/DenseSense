@@ -1,41 +1,45 @@
-import numpy as np
+import DenseSense.algorithms.Algorithm
 
+import numpy as np
 from scipy.interpolate import griddata
 from scipy.spatial import qhull
 
 
-class UVMapper(Algorithm):
+class UVMapper(DenseSense.algorithms.Algorithm.Algorithm):
 
     def __init__(self, db=None):
         super().__init__()
 
-    def extract(self, people, mergedIUVs, image, threshold=100):
-        resolution = 64
-        I, U, V = mergedIUVs[0].astype(np.uint8), mergedIUVs[1], mergedIUVs[2]
+    def extract(self, people, image, threshold=100):
+        resolution = 32
 
-        peopleTexture = []
+        peopleMaps = []
         for person in people:
-            bbox = person["bounds"]
+            bbox = person.bounds
+
+            # Check if person is large enough to work with
             area = (bbox[3] - bbox[1]) * (bbox[2] - bbox[0])
             if area < threshold:
-                peopleTexture.append(None)
+                peopleMaps.append(None)
                 continue
 
-            personTexture = np.zeros((25, resolution, resolution, 3), dtype=np.uint8)
+            # Create person texture
+            personMap = np.zeros((15, resolution, resolution, 3), dtype=np.uint8)
 
-            for partIndex in xrange(1, 25):
-                box = np.asarray(person["bounds"], np.int32)
+            # Go through each body part
+            for partIndex in range(1, 15):  # 0 is background
+                x, y = np.where(person.S == partIndex)
+                if x.size < 4:  # Need at least 4 pixels to interpolate
+                    continue
 
-                x, y = np.where(I[box[1]:box[3], box[0]:box[2]] == partIndex)
-                if x.size < 4:  # Need at least 4 pixels geo interpolate
-                    continue  # Did not find this bodypa ge
-
-                u = U[box[1]:box[3], box[0]:box[2]][x, y]
-                v = V[box[1]:box[3], box[0]:box[2]][x, y]
+                u = person.U[x, y]
+                v = person.V[x, y]
 
                 # Add box global location
-                x += np.floor(box[1]).astype(np.int64)  # CHANGE
-                y += np.floor(box[0]).astype(np.int64)  # CHANGE
+                x = np.floor(x*(bbox[3]-bbox[1])/56.0).astype(np.int32)
+                x += bbox[1].astype(np.int32)
+                y = np.floor(y*(bbox[2]-bbox[0])/56.0).astype(np.int32)
+                y += bbox[0].astype(np.int32)
 
                 pixels = image[x, y]
 
@@ -50,16 +54,22 @@ class UVMapper(Algorithm):
                 except qhull.QhullError as e:
                     continue
 
-                personTexture[partIndex] = texture
+                personMap[partIndex] = texture
 
-            # Put all textures in one square image
-            personTexture = np.split(personTexture, 5)
-            personTexture = np.concatenate(personTexture, axis=2)
-            personTexture = np.concatenate(personTexture, axis=0)
+            peopleMaps.append(personMap)
 
-            peopleTexture.append(personTexture)
-
-        return np.array(peopleTexture)
+        return np.array(peopleMaps)
 
     def train(self, saveModel):
         raise Exception("UV extraction algorithm cannot be trained")
+
+    def getPeopleTexture(self, peopleMaps):
+        peopleTextures = []
+        for personMap in peopleMaps:
+            # Put all textures in one square image
+            personTexture = np.split(personMap, 5)
+            personTexture = np.concatenate(personTexture, axis=2)
+            personTexture = np.concatenate(personTexture, axis=0)
+            peopleTextures.append(personTexture)
+
+        return peopleTextures

@@ -76,7 +76,7 @@ class DensePoseWrapper(Algorithm):
             # Merge U and V
             Un = bodies.U[i].cpu().numpy().astype(np.float32)
             person.U = np.zeros(person.S.shape, dtype=np.float32)
-            Vn = bodies.U[i].cpu().numpy().astype(np.float32)
+            Vn = bodies.V[i].cpu().numpy().astype(np.float32)
             person.V = np.zeros(person.S.shape, dtype=np.float32)
             for partId in range(Un.shape[0]):
                 person.U[person.I == partId] = Un[partId][person.I == partId].clip(0, 1)

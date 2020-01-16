@@ -3,6 +3,7 @@ from colormath.color_objects import sRGBColor, HSVColor
 from colormath.color_conversions import convert_color
 import cv2
 
+
 class Person(object):
     incremental = 0
 
@@ -57,12 +58,12 @@ class Person(object):
         if which is None or "S" in which:
             S = np.zeros((56, 56))
             S[p[1]:p[1]+d[1], p[0]:p[0]+d[0]] = cv2.resize(self.S, d, interpolation=cv2.INTER_AREA)
-            self.S = S
+            self.S = S.astype(np.int32)
 
         if which is None or "I" in which:
             I = np.zeros((56, 56))
             I[p[1]:p[1]+d[1], p[0]:p[0]+d[0]] = cv2.resize(self.I, d, interpolation=cv2.INTER_AREA)
-            self.I = I
+            self.I = I.astype(np.int32)
 
         if which is None or "U" in which:
             U = np.zeros((56, 56))

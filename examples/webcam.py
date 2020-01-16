@@ -11,7 +11,7 @@ import numpy as np
 from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
 from DenseSense.algorithms.Sanitizer import Sanitizer
 from DenseSense.algorithms.Tracker import Tracker
-#from DenseSense.algorithms.uv_extractor import UVMapper
+from DenseSense.algorithms.UVMapper import UVMapper
 
 
 def white_balance(image):
@@ -31,7 +31,7 @@ def main():
     sanitizer = Sanitizer()
     sanitizer.loadModel("./models/Sanitizer.pth")
     tracker = Tracker()
-    #uvMapper =  UVMapper()
+    uvMapper = UVMapper()
 
     while True:
         # Get image from webcam
@@ -54,8 +54,11 @@ def main():
         tracker.extract(people, True)
         debugImage = tracker.renderDebug(debugImage, people)
 
-        # Extact UV map for each person
-        #uvs = uvMapper.extract(people, mergedIUVs, image)
+        # Extract UV map for each person
+        peopleMaps = uvMapper.extract(people, image)
+        peopleTextures = uvMapper.getPeopleTexture(peopleMaps)
+        for i in range(len(peopleTextures)):
+            cv2.imshow("UV image "+str(i), peopleTextures[i])
 
         # Show image
         print("Show image")
