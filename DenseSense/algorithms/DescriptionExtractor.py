@@ -202,7 +202,7 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
     def extract(self, peopleMaps):
         labelsPeople = []
         # Do label classification
-        for personMap in peopleMaps:  # TODO: batch run all people
+        for personMap in peopleMaps: 
             # Run the classification on it
             pyTorchTexture = torch.from_numpy(
                 np.array([np.moveaxis(personTexture / 255.0, -1, 0)])).float()
@@ -286,7 +286,12 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
 
                 groundtruth = torch.from_numpy(groundtruth).to(device)
 
-                # TODO: apply noise to peopleTextures
+                # Apply noise to peopleTextures
+                noise = np.random.randn(*peopleTextures.shape)*5
+                b = peopleTextures.astype(np.int32)
+                peopleTextures = peopleTextures.astype(np.int32) + noise.astype(np.int32)
+                peopleTextures = np.clip(peopleTextures, 0, 255)
+                peopleTextures = peopleTextures.astype(np.uint8)
 
                 peopleTextures = torch.Tensor(peopleTextures).to(device)
                 predictions = self.classifier.forward(peopleTextures)
@@ -311,7 +316,7 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Show visualization
                 if visualize:
-                    pass
+                    pass # TODO
                     """
                     image = self.renderDebug(image)
                     plt.ion()
@@ -357,7 +362,7 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
             for j in range(20):
                 x = np.random.randint(xMin, xMin + areaS)
                 y = np.random.randint(yMin, yMin + areaS)
-                b = personTexture[x, y, 0]
+                b = personTexture[x, y, 0] # FIXME
                 g = personTexture[x, y, 1]
                 r = personTexture[x, y, 2]
 
