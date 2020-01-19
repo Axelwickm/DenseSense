@@ -4,7 +4,6 @@ import DenseSense.algorithms.Algorithm
 from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
 from DenseSense.utils.LMDBHelper import LMDBHelper
 
-import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -197,7 +196,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                     if aArea < bArea:
                         bMask = bMask.unsqueeze(0)
                         bMask = F.adaptive_avg_pool2d(bMask, aMask.shape)[0]
-                    elif bArea < aArea:
+                    else:
                         aMask = aMask.unsqueeze(0)
                         aMask = F.adaptive_avg_pool2d(aMask, bMask.shape)[0]
 
