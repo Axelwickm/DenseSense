@@ -27,7 +27,27 @@ def main():
     alreadyExists = os.path.exists(modelPath)
 
     if args.algorithm == "DescriptionExtractor":
-        pass  # TODO
+        from DenseSense.algorithms.DescriptionExtractor import DescriptionExtractor
+        descriptionExtractor = DescriptionExtractor()
+        # FIXME: should be put in a function
+        if alreadyExists and not args.override:
+            print("Will keep working on existing model")
+            descriptionExtractor.loadModel(modelPath)
+        descriptionExtractor.saveModel(modelPath)
+
+        dataset = "val"
+        if args.dataset is not None:
+            dataset = args.dataset
+
+        try:
+            tb = int(args.tensorboard)
+            tb = True if 0 < tb else False
+        except ValueError:
+            tb = args.tensorboard
+
+        descriptionExtractor.train(epochs=args.epochs, dataset=dataset, learningRate=args.learningRate,
+                        useDatabase=args.lmdb, printUpdateEvery=args.print,
+                        visualize=args.visualize, tensorboard=tb)
 
     elif args.algorithm == "Sanitizer":
         from DenseSense.algorithms.Sanitizer import Sanitizer
