@@ -12,6 +12,7 @@ from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
 from DenseSense.algorithms.Sanitizer import Sanitizer
 from DenseSense.algorithms.Tracker import Tracker
 from DenseSense.algorithms.UVMapper import UVMapper
+from DenseSense.algorithms.DescriptionExtractor import DescriptionExtractor
 
 
 def white_balance(image):
@@ -32,6 +33,7 @@ def main():
     sanitizer.loadModel("./models/Sanitizer.pth")
     tracker = Tracker()
     uvMapper = UVMapper()
+    descriptionExtractor = DescriptionExtractor()
 
     while True:
         # Get image from webcam
@@ -59,6 +61,9 @@ def main():
         peopleTextures = uvMapper.getPeopleTexture(peopleMaps)
         for i in range(len(peopleTextures)):
             cv2.imshow("UV image "+str(i), peopleTextures[i])
+
+        # Classify what the person is wearing
+        clothes = descriptionExtractor.extract(peopleMaps)
 
         # Show image
         print("Show image")
