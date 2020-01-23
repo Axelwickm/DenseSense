@@ -9,3 +9,5 @@ future
 lmdb
 tensorboard
 tensorboardx
+Cython
+pycocotools

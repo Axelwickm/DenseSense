@@ -13,7 +13,7 @@ from detectron2.engine.defaults import DefaultPredictor
 
 # TODO: set these paths outside this file
 config_fpath = "./models/densepose_rcnn_R_50_FPN_s1x.yaml"
-model_fpath = "./models/DensePose_ResNet50_FPN_s1x.pkl"
+model_fpath = "./models/R_50_FPN_s1x.pkl"
 
 cfg = get_cfg()
 cfg.NUM_GPUS = 1
