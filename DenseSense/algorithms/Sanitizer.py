@@ -6,6 +6,7 @@ from DenseSense.utils.LMDBHelper import LMDBHelper
 
 import matplotlib.pyplot as plt
 import numpy as np
+import cv2
 
 import torch
 import torch.nn as nn
