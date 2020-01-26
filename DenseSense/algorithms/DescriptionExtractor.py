@@ -200,28 +200,29 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         self.lossFunction = torch.nn.BCEWithLogitsLoss()
 
     def extract(self, peopleMaps):
+        if len(peopleMaps) == 0:
+            return []
         labelsPeople = []
-        return labelsPeople
+        determineColorThreshold = 0.75
+
         # Do label classification
-        for personMap in peopleMaps: 
-            # Run the classification on it
-            pyTorchTexture = torch.from_numpy(
-                np.array([np.moveaxis(personTexture / 255.0, -1, 0)])).float()
+        # FIXME: double check that the color order is correct
+        peopleMapsDevice = torch.Tensor(peopleMaps).to(device)
+        predictions = self.classifier.forward(peopleMapsDevice)
+        predictions = predictions.sigmoid()
+        predictions = predictions.detach().cpu().numpy()
 
-            pyTorchTexture = pyTorchTexture.to(device)  # FIXME: Do in model
-            labelVector = self.net(pyTorchTexture)[0]
-
-            # Store the data
-            labelVectorHost = labelVector.detach().cpu().numpy()
+        # Compile predictions into nice dictionary
+        for prediction in predictions:
             labels = {}
-            for j in range(len(labelVector)):
-                label = self.availableLabels.values()[j]
-                d = (self.onActivation - self.noActivation) / 2
-                val = (labelVectorHost[j] - d) / d + 0.5
+            for i, value in enumerate(prediction):
+                if i == 0:  # 0 is None, and not trained on anyways
+                    continue
+                label = self.availableLabels[i]
 
-                info = {"activation": min(max(val, 0.0), 1.0)}
-                if 0.7 < val:
-                    color = self._findColorName(personTexture, self.labelBodyparts[label])
+                info = {"activation": value}
+                if determineColorThreshold < value and False:  # FIXME
+                    color = self._findColorName(peopleMaps, self.labelBodyparts[label])
                     if color != 0:
                         info.update(color)
                         # print(color["color"]+"  "+color["coloredStr"])
@@ -317,7 +318,7 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Show visualization
                 if visualize:
-                    pass # TODO
+                    pass  # TODO
                     """
                     image = self.renderDebug(image)
                     plt.ion()

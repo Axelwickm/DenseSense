@@ -27,6 +27,7 @@ def white_balance(image):
 
 def main():
     cam = cv2.VideoCapture(0)
+    i = 0
 
     densepose = DensePoseWrapper()
     sanitizer = Sanitizer()
@@ -66,14 +67,14 @@ def main():
         clothes = descriptionExtractor.extract(peopleMaps)
 
         # Show image
-        print("Show image")
+        print("Show frame:", i, "\n")
         cv2.imshow("debug image", debugImage)
+        i += 1
 
         # Quit on escape
         if cv2.waitKey(1) == 27:
             break
 
-        print("")
 
     cv2.destroyAllWindows()
 
