@@ -185,6 +185,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             overlapsInds = np.array(list(zip(*np.where(overlaps))))
             overlapsCorr = np.full_like(overlaps, 0, dtype=np.float)
 
+            # Find correlations between overlapping ROIs
             if overlapsInds.shape[0] != 0:
                 for a, b in overlapsInds:  # For every overlap
                     # Extract part that overlaps from mask and make sizes match to smallest dim
@@ -194,6 +195,8 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                     bMask = self._getTransformedROI(masked[b, 0], self._ROI_bounds[b], xCoords, yCoords)
                     aArea = aMask.shape[0]*aMask.shape[1]
                     bArea = bMask.shape[0]*bMask.shape[1]
+
+                    # Scale down the biggest one
                     if aArea < bArea:
                         bMask = bMask.unsqueeze(0)
                         bMask = F.adaptive_avg_pool2d(bMask, aMask.shape)[0]
@@ -256,7 +259,8 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
             newPeople = []
 
-            # Update all people data their data
+            # Update all people data their data.
+            print(coupled)
             while len(coupled) != 0:
                 instance = next(iter(coupled))
                 instances = list(coupled[instance][0])
@@ -265,6 +269,14 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                 instances = list(map(lambda i: people[i], instances))
                 instances[0].merge(instances[1:])
                 newPeople.append(instances[0])
+
+            # Lonely ROIs are kept alive if it is at least 20 % active
+            activeThreshold = 0.2
+            for i, person in enumerate(people):
+                if i not in coupled:
+                    active = torch.mean(masked[i])
+                    if activeThreshold < active:
+                        newPeople.append(person)
 
             return newPeople
 
