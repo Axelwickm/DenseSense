@@ -257,23 +257,30 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                     coupled[a] = n
                     coupled[b] = n
 
-            newPeople = []
+            # Only keep lowest in coupled
+            for i in list(coupled):
+                try:
+                    for j in coupled[i][0]:
+                        del coupled[j]
+                except KeyError:
+                    pass
 
             # Update all people data their data.
-            print(coupled)
-            while len(coupled) != 0:
-                instance = next(iter(coupled))
-                instances = list(coupled[instance][0])
-                for i in instances:
-                    del coupled[i]
-                instances = list(map(lambda i: people[i], instances))
-                instances[0].merge(instances[1:])
-                newPeople.append(instances[0])
-
-            # Lonely ROIs are kept alive if it is at least 20 % active
+            newPeople = []
             activeThreshold = 0.2
             for i, person in enumerate(people):
-                if i not in coupled:
+                if i in coupled:
+                    # Merge all coupled into one person
+                    instance = coupled[i]
+                    instances = list(coupled[instance][0])
+                    del coupled[i]
+                    for j in instances:
+                        del coupled[j]
+                    instances = list(map(lambda i: people[i], instances))
+                    instances[0].merge(instances[1:])
+                    newPeople.append(instances[0])
+                else:
+                    # Lonely ROIs are kept alive if it is at least 20 % active
                     active = torch.mean(masked[i])
                     if activeThreshold < active:
                         newPeople.append(person)
