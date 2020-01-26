@@ -193,16 +193,16 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
             if not person.attrs["track"]["isVisible"]:
                 # Draw dark rectangle to indicate this person is being suppressed
                 image = cv2.rectangle(image, (bnds[0], bnds[1]),
-                                      (bnds[2], bnds[3]), (10, 10, 10), 1)
+                                      (bnds[2], bnds[3]), (100, 100, 100), 2)
             else:
                 # Person is visible
                 if person.attrs["track"]["lastSeenFrame"] != self.frame:
                     # Person is being hallucinated, indicated by filled rectangle
                     image[bnds[1]:bnds[3]:3, bnds[0]:bnds[2]:3] = person.color
-
-                # Daw bright rectangle
-                image = cv2.rectangle(image, (bnds[0], bnds[1]),
-                                      (bnds[2], bnds[3]),
-                                      person.color, 2)
+                else:
+                    # Draw bright rectangle
+                    image = cv2.rectangle(image, (bnds[0], bnds[1]),
+                                          (bnds[2], bnds[3]),
+                                          person.color, 2)
 
         return image

@@ -108,9 +108,9 @@ class DensePoseWrapper(Algorithm):
         for person in people:
             # Draw bounding box rectangle
             bnds = person.bounds.astype(np.uint32)
-            image = cv2.rectangle(image, (bnds[0], bnds[1]),
-                                  (bnds[2], bnds[3]),
-                                  (100, 100, 100), 2)
+            image -= cv2.rectangle(np.zeros_like(image), (bnds[0], bnds[1]),
+                                   (bnds[2], bnds[3]),
+                                   (20, 20, 20), 1)
 
             # Get color of body parts using cv2 color map
             matrix = (person.I * (255 / 25)).astype(np.uint8)
