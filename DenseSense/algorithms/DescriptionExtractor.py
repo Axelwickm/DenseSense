@@ -201,6 +201,7 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
 
     def extract(self, peopleMaps):
         labelsPeople = []
+        return labelsPeople
         # Do label classification
         for personMap in peopleMaps: 
             # Run the classification on it
