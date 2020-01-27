@@ -28,6 +28,7 @@ def white_balance(image):
 def main():
     cam = cv2.VideoCapture(0)
     frameIndex = 0
+    oldOpenWindows = set()
 
     densepose = DensePoseWrapper()
     sanitizer = Sanitizer()
@@ -57,16 +58,25 @@ def main():
         print("Sanitizer people", len(people))
 
         # Track the people (which modifies the people variables)
-        #tracker.extract(people, True)
-        #debugImage = tracker.renderDebug(debugImage, people)
+        tracker.extract(people, True)
+        debugImage = tracker.renderDebug(debugImage, people)
         print("Tracker people", len(people))
 
         # Extract UV map for each person
         peopleMaps = uvMapper.extract(people, image)
         peopleTextures = uvMapper.getPeopleTexture(peopleMaps)
-        for i in range(len(peopleTextures)):
-            break
-            cv2.imshow("UV image "+str(i), peopleTextures[i])
+
+        # Per person window management
+        newOpenWindows = set()
+        for i, person in enumerate(people):
+            windowName = "UV image "+str(person.id)
+            newOpenWindows.add(windowName)
+            cv2.imshow(windowName, peopleTextures[i])
+
+        for oldWindow in oldOpenWindows:
+            if oldWindow not in newOpenWindows:
+                cv2.destroyWindow(oldWindow)
+        oldOpenWindows = newOpenWindows
 
         # Classify what the person is wearing
         clothes = descriptionExtractor.extract(peopleMaps)
