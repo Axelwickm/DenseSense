@@ -327,11 +327,20 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         images = []
         for personLabel in self.peopleLabels:
             # Sort labels by score
+            labels = sorted(list(personLabel.items()), key=lambda x: x[1]["activation"], reverse=True)
 
             # Create image
-            image = np.zeros((200, 100, 3))
-            image = cv2.putText(image, 'testing', (100, 100))
-            images.append(image)
+            image = np.zeros((160, 160, 3))
+            for i, label in enumerate(labels):
+                name, classification = label
+                text = "{0:4d}%   {1}".format(int(classification["activation"]*100), name)
+                color = (255, 255, 255)
+                if classification["activation"] < 0.75:
+                    color = (128, 128, 128)
+                image = cv2.putText(image, text, (0, 12+12*i), cv2.FONT_HERSHEY_DUPLEX, .3,
+                                    color, 1, cv2.LINE_AA)
+                # TODO: add color
+            images.append(image.astype(np.uint8))
 
         return images
 

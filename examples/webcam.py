@@ -68,16 +68,21 @@ def main():
 
         # Classify what the person is wearing
         clothes = descriptionExtractor.extract(peopleMaps)
-        clothingImage = descriptionExtractor.getLabelImage()
+        clothingImages = descriptionExtractor.getLabelImage()
 
 
         # Per person window management
         newOpenWindows = set()
         for i, person in enumerate(people):
+            # Stack images
+            personWindow = cv2.resize(peopleTextures[i], (int(5/3*160), 160))
+            personWindow = np.hstack((personWindow, clothingImages[i]))
+
+            # View window
             windowName = "UV image "+str(person.id)
             newOpenWindows.add(windowName)
-            #cv2.imshow(windowName, peopleTextures[i])
-            cv2.imshow(windowName, clothingImage[i])
+            cv2.imshow(windowName, personWindow)
+            cv2.resizeWindow(windowName, 600, 600)
 
         for oldWindow in oldOpenWindows:
             if oldWindow not in newOpenWindows:
