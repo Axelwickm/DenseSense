@@ -70,13 +70,14 @@ def main():
         clothes = descriptionExtractor.extract(peopleMaps)
         clothingImages = descriptionExtractor.getLabelImage()
 
-
         # Per person window management
         newOpenWindows = set()
         for i, person in enumerate(people):
             # Stack images
             personWindow = cv2.resize(peopleTextures[i], (int(5/3*160), 160))
-            personWindow = np.hstack((personWindow, clothingImages[i]))
+            coloredSlice = np.zeros((160, 3, 3), dtype=np.uint8)
+            coloredSlice[:, :] = person.color
+            personWindow = np.hstack((coloredSlice, personWindow, clothingImages[i]))
 
             # View window
             windowName = "UV image "+str(person.id)
