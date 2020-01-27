@@ -146,6 +146,8 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         self.classifier = DescriptionExtractor.Network(len(self.availableLabels))
         self.modelPath = None
         self._training = False
+        self.predictions = []
+        self.peopleLabels = []
 
         # Init color lookup KD-tree
         self.colorsHSV = []
@@ -202,18 +204,18 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
     def extract(self, peopleMaps):
         if len(peopleMaps) == 0:
             return []
-        labelsPeople = []
+        self.peopleLabels = []
         determineColorThreshold = 0.75
 
         # Do label classification
         # FIXME: double check that the color order is correct
         peopleMapsDevice = torch.Tensor(peopleMaps).to(device)
-        predictions = self.classifier.forward(peopleMapsDevice)
-        predictions = predictions.sigmoid()
-        predictions = predictions.detach().cpu().numpy()
+        self.predictions = self.classifier.forward(peopleMapsDevice)
+        self.predictions = self.predictions.sigmoid()
+        self.predictions = self.predictions.detach().cpu().numpy()
 
         # Compile predictions into nice dictionary
-        for prediction in predictions:
+        for prediction in self.predictions:
             labels = {}
             for i, value in enumerate(prediction):
                 if i == 0:  # 0 is None, and not trained on anyways
@@ -228,8 +230,8 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
                         # print(color["color"]+"  "+color["coloredStr"])
                 labels[label] = info
 
-            labelsPeople.append(labels)
-        return labelsPeople
+            self.peopleLabels.append(labels)
+        return self.peopleLabels
 
     def train(self, epochs=100, learningRate=0.005, dataset="Coco",
               useDatabase=True, printUpdateEvery=40,
@@ -316,21 +318,22 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
                     absI = i + epoch * Iterations
                     writer.add_scalar("Loss size", lossSize, absI)
 
-                # Show visualization
-                if visualize:
-                    pass  # TODO
-                    """
-                    image = self.renderDebug(image)
-                    plt.ion()
-                    plt.imshow(cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
-                    plt.draw()
-                    plt.pause(4)
-                    """
-
             print("Finished epoch {} / {}. Loss size:".format(epoch, epochs, epochLoss))
             self.saveModel(self.modelPath)
 
         self._training = False
+
+    def getLabelImage(self):
+        images = []
+        for personLabel in self.peopleLabels:
+            # Sort labels by score
+
+            # Create image
+            image = np.zeros((200, 100, 3))
+            image = cv2.putText(image, 'testing', (100, 100))
+            images.append(image)
+
+        return images
 
     def _load(self, index):
         cocoImage = self.dataset[index]

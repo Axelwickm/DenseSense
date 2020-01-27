@@ -66,20 +66,23 @@ def main():
         peopleMaps = uvMapper.extract(people, image)
         peopleTextures = uvMapper.getPeopleTexture(peopleMaps)
 
+        # Classify what the person is wearing
+        clothes = descriptionExtractor.extract(peopleMaps)
+        clothingImage = descriptionExtractor.getLabelImage()
+
+
         # Per person window management
         newOpenWindows = set()
         for i, person in enumerate(people):
             windowName = "UV image "+str(person.id)
             newOpenWindows.add(windowName)
-            cv2.imshow(windowName, peopleTextures[i])
+            #cv2.imshow(windowName, peopleTextures[i])
+            cv2.imshow(windowName, clothingImage[i])
 
         for oldWindow in oldOpenWindows:
             if oldWindow not in newOpenWindows:
                 cv2.destroyWindow(oldWindow)
         oldOpenWindows = newOpenWindows
-
-        # Classify what the person is wearing
-        clothes = descriptionExtractor.extract(peopleMaps)
 
         # Show image
         print("Show frame:", frameIndex, "\n")
