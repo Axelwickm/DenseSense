@@ -27,7 +27,7 @@ def white_balance(image):
 
 def main():
     cam = cv2.VideoCapture(0)
-    i = 0
+    frameIndex = 0
 
     densepose = DensePoseWrapper()
     sanitizer = Sanitizer()
@@ -49,27 +49,32 @@ def main():
         people = densepose.extract(image)
         debugImage = densepose.renderDebug(debugImage, people)
 
+        print("DensePose people:", len(people))
+
         # Refine DensePose output to get actual people
         people = sanitizer.extract(people)
-        debugImage = sanitizer.renderDebug(debugImage, alpha=0.2)
+        debugImage = sanitizer.renderDebug(debugImage, people, alpha=0.2)
+        print("Sanitizer people", len(people))
 
         # Track the people (which modifies the people variables)
-        tracker.extract(people, True)
-        debugImage = tracker.renderDebug(debugImage, people)
+        #tracker.extract(people, True)
+        #debugImage = tracker.renderDebug(debugImage, people)
+        print("Tracker people", len(people))
 
         # Extract UV map for each person
         peopleMaps = uvMapper.extract(people, image)
         peopleTextures = uvMapper.getPeopleTexture(peopleMaps)
         for i in range(len(peopleTextures)):
+            break
             cv2.imshow("UV image "+str(i), peopleTextures[i])
 
         # Classify what the person is wearing
         clothes = descriptionExtractor.extract(peopleMaps)
 
         # Show image
-        print("Show frame:", i, "\n")
+        print("Show frame:", frameIndex, "\n")
         cv2.imshow("debug image", debugImage)
-        i += 1
+        frameIndex += 1
 
         # Quit on escape
         if cv2.waitKey(1) == 27:

@@ -33,6 +33,7 @@ class Person(object):
         self.V = otherInstance.V
 
         self.attrs.update(otherInstance.attrs)
+        self.bounds = otherInstance.bounds
         return self
 
     def applyAlpha(self, which=None):

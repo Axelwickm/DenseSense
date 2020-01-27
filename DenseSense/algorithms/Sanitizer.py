@@ -257,33 +257,25 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                     coupled[a] = n
                     coupled[b] = n
 
-            # Only keep lowest in coupled
-            for i in list(coupled):
-                try:
-                    for j in coupled[i][0]:
-                        del coupled[j]
-                except KeyError:
-                    pass
-
             # Update all people data their data.
+            ActiveThreshold = 0.2  # FIXME: magic number
             newPeople = []
-            activeThreshold = 0.2
+            skip = set()
             for i, person in enumerate(people):
-                if i in coupled:
-                    # Merge all coupled into one person
-                    instance = coupled[i]
-                    instances = list(coupled[instance][0])
-                    del coupled[i]
-                    for j in instances:
-                        del coupled[j]
-                    instances = list(map(lambda i: people[i], instances))
-                    instances[0].merge(instances[1:])
-                    newPeople.append(instances[0])
-                else:
-                    # Lonely ROIs are kept alive if it is at least 20 % active
-                    active = torch.mean(masked[i])
-                    if activeThreshold < active:
-                        newPeople.append(person)
+                if i not in skip:
+                    if i in coupled:
+                        # Merge all coupled into one person
+                        instances = list(coupled[i][0])
+                        for j in instances:
+                            skip.add(j)
+                        instances = list(map(lambda i: people[i], instances))
+                        instances[0].merge(instances[1:])
+                        newPeople.append(instances[0])
+                    else:
+                        # Lonely ROIs are kept alive if it is at least 20 % active
+                        active = torch.mean(masked[i])
+                        if ActiveThreshold < active:
+                            newPeople.append(person)
 
             return newPeople
 
@@ -501,7 +493,7 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
 
         return ROI_mask
 
-    def renderDebug(self, image, alpha=0.55):
+    def renderDebug(self, image, people, alpha=0.55):
         # Normalize ROIs from (0, 1) to (0, 255)
         ROIsMaskNorm = self._ROI_masks * 255
 
@@ -527,5 +519,11 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             overlap = image[bnds[1]:bnds[3], bnds[0]:bnds[2]]
             mask = mask * alpha + overlap * (1.0 - alpha)
             image[bnds[1]:bnds[3], bnds[0]:bnds[2]] = mask
+
+        for person in people:
+            bnds = person.bounds
+            image = cv2.rectangle(image, (bnds[0], bnds[1]),
+                                  (bnds[2], bnds[3]),
+                                  (60, 20, 20), 2)
 
         return image
