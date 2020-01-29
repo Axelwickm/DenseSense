@@ -47,13 +47,14 @@ Adding a configuration file for DenseSense is TODO.
 
 ## Getting the datasets for training
 Sanitizer: COCO (script included for downloading just the training instances with people in)
+
 DescriptionExtractor: DeepFashion2
 
-### COCO
-[Download](http://cocodataset.org/#download) the instances val/train 2014/2017 annotation file, place it in the annotations folder, and run downloadCocoPeople.py from inside the data folder. This will download all the images and place them in data.
+### [COCO](http://cocodataset.org/#download)
+Download the instances val/train 2014/2017 annotation file, place it in the annotations folder, and run downloadCocoPeople.py from inside the data folder. This will download all the images and place them in data.
 
-### Deepfashion2
-[Download](https://github.com/switchablenorms/DeepFashion2) (you have to fill out a form) and place data under ./data/DeepFashion2/{val, train}. Place the annotation fileS inside ./annotations/deepfashion2_annotations_{val, train}. Afterwards run deepfashion2_to_coco.py from inside ./annotations.
+### [Deepfashion2](https://github.com/switchablenorms/DeepFashion2)
+Download (you have to fill out a form) and place data under ./data/DeepFashion2/{val, train}. Place the annotation fileS inside ./annotations/deepfashion2_annotations_{val, train}. Afterwards run deepfashion2_to_coco.py from inside ./annotations.
 
 ## Example debug output
 TODO
