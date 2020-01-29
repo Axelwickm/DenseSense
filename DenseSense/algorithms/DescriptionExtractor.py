@@ -1,3 +1,5 @@
+import time
+
 import DenseSense.algorithms.Algorithm
 from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
 from DenseSense.algorithms.Sanitizer import Sanitizer
@@ -205,7 +207,7 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         if len(peopleMaps) == 0:
             return []
         self.peopleLabels = []
-        determineColorThreshold = 0.75
+        determineColorThreshold = 0.7
 
         # Do label classification
         # FIXME: double check that the color order is correct
@@ -214,23 +216,49 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         self.predictions = self.predictions.sigmoid()
         self.predictions = self.predictions.detach().cpu().numpy()
 
+        t1 = time.time()
         # Compile predictions into nice dictionary
-        for prediction in self.predictions:
+        for personIndex, prediction in enumerate(self.predictions):
             labels = {}
+            # Some labels might use same areas for determining color
+            # This is therefore a lookup table in case value has already been computed
+            averages = np.full((peopleMaps.shape[1], 3), -1, dtype=np.int64)
             for i, value in enumerate(prediction):
                 if i == 0:  # 0 is None, and not trained on anyways
                     continue
                 label = self.availableLabels[i]
 
                 info = {"activation": value}
-                if determineColorThreshold < value and False:  # FIXME
-                    color = self._findColorName(peopleMaps, self.labelBodyparts[label])
-                    if color != 0:
-                        info.update(color)
-                        # print(color["color"]+"  "+color["coloredStr"])
+                if determineColorThreshold < value:
+                    # If certainty is above threshold, take the time to calculate the average color
+                    averageOfAreas = np.zeros(3, dtype=np.int64)
+                    relevantAreas = torch.arange(len(averages)).to(device)  # FIXME: look up depending on label index
+                    nonBlackAreas = 0
+                    for areaIndex in relevantAreas:
+                        if (averages[areaIndex] == -1).all():
+                            # Calculate average
+                            relevantPixels = peopleMapsDevice[personIndex, areaIndex, :, :]
+                            relevantPixels = relevantPixels[torch.sum(relevantPixels, axis=2) != 0]
+                            if relevantPixels.shape[0] == 0:
+                                # All black
+                                averages[areaIndex] = np.zeros(3)
+                                continue
+                            average = relevantPixels.mean(axis=0).cpu().numpy().astype(np.uint8)
+                            averages[areaIndex] = average
+
+                        nonBlackAreas += 1
+                        averageOfAreas += averages[areaIndex]
+                    averageOfAreas = (averageOfAreas/float(nonBlackAreas)).astype(np.uint8)
+
+                    # TODO:
+                    # color =
+                    # info.update(color)
+                    # print(color["color"]+"  "+color["coloredStr"])
                 labels[label] = info
 
             self.peopleLabels.append(labels)
+        t2 = time.time()
+        print("TIME:", (t2 - t1) * 1000)
         return self.peopleLabels
 
     def train(self, epochs=100, learningRate=0.005, dataset="Coco",
