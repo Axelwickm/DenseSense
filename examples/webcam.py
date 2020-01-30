@@ -36,6 +36,7 @@ def main():
     tracker = Tracker()
     uvMapper = UVMapper()
     descriptionExtractor = DescriptionExtractor()
+    descriptionExtractor.loadModel("./models/DescriptionExtractor.pth")
 
     while True:
         # Get image from webcam
