@@ -31,6 +31,7 @@ class Person(object):
         self.I = otherInstance.I
         self.U = otherInstance.U
         self.V = otherInstance.V
+        self.A = otherInstance.A
 
         self.attrs.update(otherInstance.attrs)
         self.bounds = otherInstance.bounds
@@ -84,7 +85,7 @@ class Person(object):
         self.bounds = newBounds
 
     def merge(self, otherInstances, which=None):
-        newBounds = self.bounds
+        newBounds = self.bounds.copy()
         for o in otherInstances:
             newBounds[:2] = np.minimum(newBounds[:2], o.bounds[:2])
             newBounds[2:] = np.maximum(newBounds[2:], o.bounds[2:])
@@ -96,12 +97,12 @@ class Person(object):
             o.applyAlpha(which=which)
             o.applyBounds(newBounds, which=which)
             if which is None or "S" in which:
-                self.S = np.where(o.A, o.S, self.S)
+                self.S = np.where(self.A, self.S, o.S)
             if which is None or "I" in which:
-                self.I = np.where(o.A, o.I, self.I)
+                self.I = np.where(self.I, self.I, o.I)
             if which is None or "U" in which:
-                self.U = np.where(o.A, o.U, self.U)
+                self.U = np.where(self.A, self.U, o.U)
             if which is None or "V" in which:
-                self.V = np.where(o.A, o.V, self.V)
+                self.V = np.where(self.A, self.V, o.V)
             if which is None or "A" in which:
-                self.A += o.A
+                self.A = o.A
