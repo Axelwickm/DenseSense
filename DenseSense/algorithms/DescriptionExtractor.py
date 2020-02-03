@@ -42,22 +42,40 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         13: "sling dress"
     }
 
-    # FIXME: change because now using S
-    labelBodyparts = {  # https://github.com/facebookresearch/DensePose/issues/64#issuecomment-405608749 PRAISE
-        "boots": [5, 6],
-        "footwear": [5, 6],
-        "outer": [1, 2, 15, 17, 16, 18, 19, 21, 20, 22],
-        "dress": [1, 2],
-        "sunglasses": [],
-        "pants": [7, 9, 8, 10, 11, 13, 12, 14],
-        "top": [1, 2],
-        "shorts": [7, 9, 8, 10],
-        "skirt": [1, 2],
-        "headwear": [23, 24],
-        "scarfAndTie": []
+    #  0 : none
+    #  1 : trousers
+    #  2 : R hand
+    #  3 : L hand
+    #  4 : R foot
+    #  5 : L foot
+    #  6 : R thigh
+    #  7 : L thigh
+    #  8 : R calf
+    #  9 : L calf
+    # 10 : L upper arm
+    # 11 : R upper arm
+    # 12 : L lower arm
+    # 13 : R lower arm
+    # 14 : head
+
+    labelColorCheck = {
+        0: [],
+        1: [1, 10, 11],
+        2: [1, 10, 11, 12, 13],
+        3: [1, 10, 11],
+        4: [1, 10, 11, 12, 13],
+        5: [1, 10, 11],
+        6: [1, 10, 11],
+        7: [6, 7],
+        8: [6, 7, 8, 9],
+        9: [6, 7],
+        10: [1, 10, 11],
+        11: [1, 10, 11, 12, 13],
+        12: [1, 10, 11],
+        13: [1, 10, 11]
     }
 
-    colors = [  # TODO: use color model file
+    colors = [
         ((255, 255, 255), "white"),
         ((210, 209, 218), "white"),
         ((145, 164, 164), "white"),
@@ -127,7 +145,6 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
             self.fc1 = nn.Linear(360, 180)
             self.relu1 = nn.ReLU(inplace=False)
             self.fc2 = nn.Linear(180, labels)
-            self.softmax = nn.Softmax()
 
         def forward(self, x):
             batchSize = x.shape[0]
@@ -138,7 +155,6 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
             x = self.fc1(x)
             x = self.relu1(x)
             x = self.fc2(x)
-            #x = self.softmax(x)
             return x
 
     def __init__(self, model=None, db=None):
@@ -207,16 +223,14 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         if len(peopleMaps) == 0:
             return []
         self.peopleLabels = []
-        determineColorThreshold = 0.7
+        determineColorThreshold = 0.3  # FIXME: tune
 
         # Do label classification
-        # FIXME: double check that the color order is correct
         peopleMapsDevice = torch.Tensor(peopleMaps).to(device)
         self.predictions = self.classifier.forward(peopleMapsDevice)
         self.predictions = self.predictions.sigmoid()
         self.predictions = self.predictions.detach().cpu().numpy()
 
-        t1 = time.time()
         # Compile predictions into nice dictionary
         for personIndex, prediction in enumerate(self.predictions):
             labels = {}
@@ -232,7 +246,7 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
                 if determineColorThreshold < value:
                     # If certainty is above threshold, take the time to calculate the average color
                     averageOfAreas = np.zeros(3, dtype=np.int64)
-                    relevantAreas = torch.arange(len(averages)).to(device)  # FIXME: look up depending on label index
+                    relevantAreas = torch.as_tensor(self.labelColorCheck[i], dtype=torch.int64).to(device)
                     nonBlackAreas = 0
                     for areaIndex in relevantAreas:
                         if (averages[areaIndex] == -1).all():
@@ -248,17 +262,14 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
 
                         nonBlackAreas += 1
                         averageOfAreas += averages[areaIndex]
-                    averageOfAreas = (averageOfAreas/float(nonBlackAreas)).astype(np.uint8)
 
-                    # TODO:
-                    # color =
-                    # info.update(color)
-                    # print(color["color"]+"  "+color["coloredStr"])
+                    averageOfAreas = (averageOfAreas/float(nonBlackAreas)).astype(np.uint8)
+                    info.update(self._findColorName(averageOfAreas))
+
                 labels[label] = info
 
             self.peopleLabels.append(labels)
-        t2 = time.time()
-        print("TIME:", (t2 - t1) * 1000)
+
         return self.peopleLabels
 
     def train(self, epochs=100, learningRate=0.005, dataset="Coco",
@@ -320,7 +331,6 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Apply noise to peopleTextures
                 noise = np.random.randn(*peopleTextures.shape)*5
-                b = peopleTextures.astype(np.int32)
                 peopleTextures = peopleTextures.astype(np.int32) + noise.astype(np.int32)
                 peopleTextures = np.clip(peopleTextures, 0, 255)
                 peopleTextures = peopleTextures.astype(np.uint8)
@@ -358,16 +368,25 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
             labels = sorted(list(personLabel.items()), key=lambda x: x[1]["activation"], reverse=True)
 
             # Create image
-            image = np.zeros((160, 160, 3))
+            image = np.zeros((160, 210, 3))
             for i, label in enumerate(labels):
                 name, classification = label
-                text = "{0:4d}%   {1}".format(int(classification["activation"]*100), name)
+                text = "{0:4d}%   {1}".format(
+                    int(classification["activation"]*100), name)
                 color = (255, 255, 255)
-                if classification["activation"] < 0.75:
+                if classification["activation"] < 0.75:  # FIXME: magic number, tune
                     color = (128, 128, 128)
                 image = cv2.putText(image, text, (0, 12+12*i), cv2.FONT_HERSHEY_DUPLEX, .3,
                                     color, 1, cv2.LINE_AA)
-                # TODO: add color
+
+                # Add color
+                if "bestMatch" in classification:
+                    colorText = classification["bestMatch"][1]
+                    colorTextColor = classification["color"]
+                    colorTextColor = (int(colorTextColor[0]), int(colorTextColor[1]), int(colorTextColor[2]))
+                    image = cv2.putText(image, colorText, (150, 12+12*i), cv2.FONT_HERSHEY_DUPLEX, .3,
+                                        colorTextColor, 1, cv2.LINE_AA)
+
             images.append(image.astype(np.uint8))
 
         return images
@@ -393,41 +412,14 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
 
         return ROIs, peopleTextures, cocoImage[1]
 
-    def _findColorName(self, personMap, areas):
-        areaS = int(personMap.shape[1] / 5)
-        Rs, Gs, Bs = [], [], []
-
-        # Pick out colors
-        for i in areas:
-            xMin = int((i % 5) * areaS)
-            yMin = int(np.floor(i / 5) * areaS)
-            for j in range(20):
-                x = np.random.randint(xMin, xMin + areaS)
-                y = np.random.randint(yMin, yMin + areaS)
-                b = personTexture[x, y, 0] # FIXME
-                g = personTexture[x, y, 1]
-                r = personTexture[x, y, 2]
-
-                if r != 0 or b != 0 or g != 0:
-                    Rs.append(r)
-                    Gs.append(g)
-                    Bs.append(b)
-
-        if len(Rs) + len(Gs) + len(Bs) < 3:
-            return 0
-
-        # Find mean color
-        r = np.mean(np.array(Rs)).astype(np.uint8)
-        g = np.mean(np.array(Gs)).astype(np.uint8)
-        b = np.mean(np.array(Bs)).astype(np.uint8)
+    def _findColorName(self, color):
+        b = color[0]
+        g = color[1]
+        r = color[2]
 
         # This prints the color colored in the terminal
-        RESET = '\033[0m'
-
-        def get_color_escape(r, g, b, background=False):
-            return '\033[{};2;{};{};{}m'.format(48 if background else 38, r, g, b)
-
-        colorRepr = get_color_escape(r, b, g) + "rgb(" + str(r) + ", " + str(g) + ", " + str(b) + ")" + RESET
+        colorRepr = '\033[{};2;{};{};{}m'.format(38, r, g, b) \
+                    + "rgb("+str(r)+", "+str(g)+", "+str(b)+")"+'\033[0m'
 
         # Get nearest color name
         HSVobj = convert_color(sRGBColor(r, g, b), HSVColor)
@@ -446,4 +438,9 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
                 diffMin = diff
                 nearestIndex = i
 
-        return {"color": self.colors[nearestIndex][1], "colorDistance": diffMin, "coloredStr": colorRepr}
+        return {
+            "color": tuple(color),
+            "colorDistance": diffMin,
+            "coloredStr": colorRepr,
+            "bestMatch": self.colors[nearestIndex]
+        }

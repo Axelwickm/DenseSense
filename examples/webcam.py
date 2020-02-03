@@ -74,11 +74,13 @@ def main():
         # Per person window management
         newOpenWindows = set()
         for i, person in enumerate(people):
-            # Stack images
+            S_ROI = (person.I * (255 / 25)).astype(np.uint8)
+            S_ROI = cv2.applyColorMap(S_ROI, cv2.COLORMAP_PARULA)
+            S_ROI = cv2.resize(S_ROI, (160, 160))
             personWindow = cv2.resize(peopleTextures[i], (int(5/3*160), 160))
             coloredSlice = np.zeros((160, 3, 3), dtype=np.uint8)
             coloredSlice[:, :] = person.color
-            personWindow = np.hstack((coloredSlice, personWindow, clothingImages[i]))
+            personWindow = np.hstack((coloredSlice, S_ROI, personWindow, clothingImages[i]))
 
             # View window
             windowName = "UV image "+str(person.id)
