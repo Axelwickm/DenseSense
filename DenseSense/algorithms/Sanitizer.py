@@ -4,13 +4,16 @@ import DenseSense.algorithms.Algorithm
 from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
 from DenseSense.utils.LMDBHelper import LMDBHelper
 
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
-import cv2
+import os
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+topDir = os.path.realpath(os.path.dirname(__file__)+"/../..")
 
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -135,8 +138,8 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
         from os import path
 
         # TODO: support other data sets than Coco
-        annFile = './annotations/instances_{}.json'.format(dataset)
-        self.cocoPath = './data/{}'.format(dataset)
+        annFile = topDir+'/annotations/instances_{}.json'.format(dataset)
+        self.cocoPath = topDir+'/data/{}'.format(dataset)
 
         self.coco = COCO(annFile)
         self.personCatID = self.coco.getCatIds(catNms=['person'])[0]
@@ -291,9 +294,9 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             from torch.utils.tensorboard import SummaryWriter
 
             if type(tensorboard) == str:
-                writer = SummaryWriter("./data/tensorboard/"+tensorboard)
+                writer = SummaryWriter(topDir+"/data/tensorboard/"+tensorboard)
             else:
-                writer = SummaryWriter("./data/tensorboard/")
+                writer = SummaryWriter(topDir+"/data/tensorboard/")
             tensorboard = True
 
             # dummy_input = torch.Tensor(5, 1, 56, 56)

@@ -9,12 +9,15 @@ from DenseSense.utils.LMDBHelper import LMDBHelper
 from colormath.color_conversions import convert_color
 from colormath.color_objects import sRGBColor, HSVColor
 import matplotlib.pyplot as plt
+import os
 
 import cv2
 import torch
 import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
+
+topDir = os.path.realpath(os.path.dirname(__file__)+"/../..")
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 if torch.cuda.is_available():
@@ -193,8 +196,8 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         from torchvision import transforms
         from torchvision.datasets import CocoDetection
 
-        self.annFile = './annotations/deepfashion2_{}.json'.format(dataset)
-        self.cocoImgPath = './data/DeepFashion2/{}'.format(dataset)
+        self.annFile = topDir+'/annotations/deepfashion2_{}.json'.format(dataset)
+        self.cocoImgPath = topDir+'/data/DeepFashion2/{}'.format(dataset)
 
         self.useDatabase = useDatabase
         self.dataset = CocoDetection(self.cocoImgPath, self.annFile,
@@ -212,7 +215,7 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
 
         self.denseposeExtractor = DensePoseWrapper()
         self.sanitizer = Sanitizer()
-        self.sanitizer.loadModel("./models/Sanitizer.pth")
+        self.sanitizer.loadModel(topDir+"/models/Sanitizer.pth")
         self.uvMapper = UVMapper()
 
         # PyTorch things
@@ -283,9 +286,9 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
             from torch.utils.tensorboard import SummaryWriter
 
             if type(tensorboard) == str:
-                writer = SummaryWriter("./data/tensorboard/"+tensorboard)
+                writer = SummaryWriter(topDir+"/data/tensorboard/"+tensorboard)
             else:
-                writer = SummaryWriter("./data/tensorboard/")
+                writer = SummaryWriter(topDir+"/data/tensorboard/")
             tensorboard = True
 
         def findBestROI(ROIs, label):

@@ -11,9 +11,11 @@ from densepose import add_densepose_config
 from detectron2.config import get_cfg
 from detectron2.engine.defaults import DefaultPredictor
 
+topDir = os.path.realpath(os.path.dirname(__file__)+"/../..")
+
 # TODO: set these paths outside this file
-config_fpath = "./models/densepose_rcnn_R_50_FPN_s1x.yaml"
-model_fpath = "./models/R_50_FPN_s1x.pkl"
+config_fpath = topDir+"/models/densepose_rcnn_R_50_FPN_s1x.yaml"
+model_fpath = topDir+"/models/R_50_FPN_s1x.pkl"
 
 cfg = get_cfg()
 cfg.NUM_GPUS = 1
