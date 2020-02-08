@@ -98,10 +98,11 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
         for i in range(len(people)):
             person = people[i]
             bounds = person.bounds
-            dims = np.array([bounds[2] - bounds[0], bounds[3] - bounds[1]])
-            center = np.array([bounds[0] + dims[0] / 2, bounds[1] + dims[1] / 2])
 
             if status[i] == -1:  # If this is a new person
+                dims = np.array([bounds[2] - bounds[0], bounds[3] - bounds[1]])
+                center = np.array([bounds[0] + dims[0] / 2, bounds[1] + dims[1] / 2])
+
                 # Construct a kalman filter
                 t = cv2.CV_32F
                 # FIXME: kalman magic numbers should be stored
@@ -142,6 +143,18 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
                 person = self.oldPeople[ind].become(person)
                 people[i] = person
                 self.oldPeople[ind] = person
+
+                # Temporal bounds smoothing
+                new_bounds = person.bounds
+                updated_bounds = old_bounds * (1 - self.bboxLag) + new_bounds * self.bboxLag
+                updated_bounds = updated_bounds.astype(np.int32)
+                person.applyBounds(updated_bounds)
+
+                bounds = updated_bounds
+                dims = np.array([bounds[2] - bounds[0], bounds[3] - bounds[1]])
+                center = np.array([updated_bounds[0] + dims[0] / 2, updated_bounds[1] + dims[1] / 2])
+
+                # Update tracking attributes
                 person.attrs["track"]["lastSeenFrame"] = self.frame
                 person.attrs["track"]["lastSeenTime"] = self.lastFrameTime
                 person.attrs["track"]["history"].append(1)
@@ -149,12 +162,6 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
                 person.attrs["track"]["kalman"].transitionMatrix[1, 3] = deltaTime * 0.4
                 person.attrs["track"]["kalman"].correct(np.array(np.concatenate([center, dims]), dtype=np.float32))
                 person.attrs["track"]["kalmanPrediction"] = person.attrs["track"]["kalman"].predict()
-
-                # Temporal bounds smoothing
-                # FIXME: if not integrated with the kalman-filter, this might not have any effect
-                new_bounds = person.bounds
-                updated_bounds = old_bounds * (1 - self.bboxLag) + new_bounds * self.bboxLag
-                person.applyBounds(updated_bounds.astype(np.int32))
 
     def _changeStates(self, people, associations):
         toRemove = []

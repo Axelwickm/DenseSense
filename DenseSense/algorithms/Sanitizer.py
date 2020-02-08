@@ -527,6 +527,6 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
             bnds = person.bounds
             image = cv2.rectangle(image, (bnds[0], bnds[1]),
                                   (bnds[2], bnds[3]),
-                                  (60, 20, 20), 2)
+                                  (60, 20, 20), 1)
 
         return image

@@ -56,15 +56,17 @@ class Person(object):
         newDims = newBounds[2:]-newBounds[:2]
         posDelta = newBounds[:2]-oldBounds[:2]
 
-        clipOld = (56*np.array([
-            max(0.0, posDelta[0]/oldDims[0]), max(0.0, posDelta[1]/oldDims[1]),
-            min(1.0, (posDelta[0]+newDims[0])/oldDims[0]),  min(1.0, (posDelta[1]+newDims[1])/oldDims[1])
-        ])).astype(np.int32)
+        clipOld = (56 * np.array([
+            posDelta[0] / oldDims[0], posDelta[1] / oldDims[1],
+            (posDelta[0] + newDims[0]) / oldDims[0], (posDelta[1] + newDims[1]) / oldDims[1]
+        ]).clip(0, 1)).astype(np.int32)
 
         clipNew = (56*np.array([
-            max(0.0, -posDelta[0]/newDims[0]), max(0.0, -posDelta[1]/newDims[1]),
-            min(1.0, (-posDelta[0]+oldDims[0])/newDims[0]), min(1.0, (-posDelta[1]+oldDims[1])/newDims[1])
-        ])).astype(np.int32)
+            -posDelta[0]/newDims[0], -posDelta[1]/newDims[1],
+            (-posDelta[0]+oldDims[0])/newDims[0], (-posDelta[1]+oldDims[1])/newDims[1]
+        ]).clip(0, 1)).astype(np.int32)
+
+        newDims = tuple([clipNew[2] - clipNew[0], clipNew[3] - clipNew[1]])
 
         if which is None or "S" in which:
             oldCrop = self.S[clipOld[1]: clipOld[3], clipOld[0]: clipOld[2]]
@@ -72,8 +74,7 @@ class Person(object):
             if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
                 S_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
                     cv2.resize(oldCrop.astype(np.float32),
-                               tuple([clipNew[2] - clipNew[0], clipNew[3] - clipNew[1]]),
-                               interpolation=cv2.INTER_NEAREST).astype(np.int32)
+                               newDims, interpolation=cv2.INTER_NEAREST).astype(np.int32)
             self.S = S_
 
         if which is None or "I" in which:
@@ -82,8 +83,7 @@ class Person(object):
             if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
                 I_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
                     cv2.resize(oldCrop.astype(np.float32),
-                               tuple([clipNew[2] - clipNew[0], clipNew[3] - clipNew[1]]),
-                               interpolation=cv2.INTER_NEAREST).astype(np.int32)
+                               newDims, interpolation=cv2.INTER_NEAREST).astype(np.int32)
             self.I = I_
 
         if which is None or "U" in which:
@@ -92,8 +92,7 @@ class Person(object):
             if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
                 U_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
                     cv2.resize(oldCrop.astype(np.float32),
-                               tuple([clipNew[2] - clipNew[0], clipNew[3] - clipNew[1]]),
-                               interpolation=cv2.INTER_NEAREST).astype(np.int32)
+                               newDims, interpolation=cv2.INTER_NEAREST).astype(np.int32)
             self.U = U_
 
         if which is None or "A" in which:
@@ -102,8 +101,7 @@ class Person(object):
             if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
                 A_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
                     cv2.resize(oldCrop.astype(np.float32),
-                               tuple([clipNew[2] - clipNew[0], clipNew[3] - clipNew[1]]),
-                               interpolation=cv2.INTER_NEAREST).astype(np.int32)
+                               newDims, interpolation=cv2.INTER_NEAREST).astype(np.int32)
             self.A = A_
 
         self.bounds = newBounds
