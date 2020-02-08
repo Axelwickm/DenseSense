@@ -9,7 +9,7 @@ import numpy as np
 
 class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
     def __init__(self, distThreshold=500, delete=0.3, hide=0.5,
-                 minFrames=3, maxPersistanceBufferSize=15):
+                 minFrames=3, maxPersistanceBufferSize=15, bboxLag = 0.4):
         super().__init__()
         self.frame = 0
         self.lastFrameTime = time.time()
@@ -19,6 +19,7 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
         self.hide = hide
         self.minFrames = minFrames
         self.maxPersistanceBufferSize = maxPersistanceBufferSize
+        self.bboxLag = bboxLag
 
         self.oldPeople = []
 
@@ -137,6 +138,7 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
 
             else:  # Else, update this persons attributes
                 ind = status[i]
+                old_bounds = self.oldPeople[ind].bounds
                 person = self.oldPeople[ind].become(person)
                 people[i] = person
                 self.oldPeople[ind] = person
@@ -147,6 +149,12 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
                 person.attrs["track"]["kalman"].transitionMatrix[1, 3] = deltaTime * 0.4
                 person.attrs["track"]["kalman"].correct(np.array(np.concatenate([center, dims]), dtype=np.float32))
                 person.attrs["track"]["kalmanPrediction"] = person.attrs["track"]["kalman"].predict()
+
+                # Temporal bounds smoothing
+                # FIXME: if not integrated with the kalman-filter, this might not have any effect
+                new_bounds = person.bounds
+                updated_bounds = old_bounds * (1 - self.bboxLag) + new_bounds * self.bboxLag
+                person.applyBounds(updated_bounds.astype(np.int32))
 
     def _changeStates(self, people, associations):
         toRemove = []

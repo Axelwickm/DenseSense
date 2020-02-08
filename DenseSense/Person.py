@@ -51,36 +51,60 @@ class Person(object):
             self.V = self.V * self.A
 
     def applyBounds(self, newBounds, which=None):
-        oldDims = self.bounds[2:]-self.bounds[:2]
+        oldBounds = self.bounds
+        oldDims = oldBounds[2:]-oldBounds[:2]
         newDims = newBounds[2:]-newBounds[:2]
-        relativeDims = oldDims/newDims
-        d = tuple(np.floor(np.array([56, 56])*relativeDims).astype(np.int32))
-        p = np.floor((self.bounds[:2]-newBounds[:2])/newDims*56).astype(np.int32)
+        posDelta = newBounds[:2]-oldBounds[:2]
+
+        clipOld = (56*np.array([
+            max(0.0, posDelta[0]/oldDims[0]), max(0.0, posDelta[1]/oldDims[1]),
+            min(1.0, (posDelta[0]+newDims[0])/oldDims[0]),  min(1.0, (posDelta[1]+newDims[1])/oldDims[1])
+        ])).astype(np.int32)
+
+        clipNew = (56*np.array([
+            max(0.0, -posDelta[0]/newDims[0]), max(0.0, -posDelta[1]/newDims[1]),
+            min(1.0, (-posDelta[0]+oldDims[0])/newDims[0]), min(1.0, (-posDelta[1]+oldDims[1])/newDims[1])
+        ])).astype(np.int32)
 
         if which is None or "S" in which:
-            S = np.zeros((56, 56))
-            S[p[1]:p[1]+d[1], p[0]:p[0]+d[0]] = cv2.resize(self.S, d, interpolation=cv2.INTER_AREA)
-            self.S = S.astype(np.int32)
+            oldCrop = self.S[clipOld[1]: clipOld[3], clipOld[0]: clipOld[2]]
+            S_ = np.zeros((56, 56), dtype=np.int32)
+            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
+                S_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
+                    cv2.resize(oldCrop.astype(np.float32),
+                               tuple([clipNew[2] - clipNew[0], clipNew[3] - clipNew[1]]),
+                               interpolation=cv2.INTER_NEAREST).astype(np.int32)
+            self.S = S_
 
         if which is None or "I" in which:
-            I = np.zeros((56, 56))
-            I[p[1]:p[1]+d[1], p[0]:p[0]+d[0]] = cv2.resize(self.I, d, interpolation=cv2.INTER_AREA)
-            self.I = I.astype(np.int32)
+            oldCrop = self.I[clipOld[1]: clipOld[3], clipOld[0]: clipOld[2]]
+            I_ = np.zeros((56, 56), dtype=np.int32)
+            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
+                I_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
+                    cv2.resize(oldCrop.astype(np.float32),
+                               tuple([clipNew[2] - clipNew[0], clipNew[3] - clipNew[1]]),
+                               interpolation=cv2.INTER_NEAREST).astype(np.int32)
+            self.I = I_
 
         if which is None or "U" in which:
-            U = np.zeros((56, 56))
-            U[p[1]:p[1] + d[1], p[0]:p[0] + d[0]] = cv2.resize(self.U, d, interpolation=cv2.INTER_AREA)
-            self.U = U
-
-        if which is None or "V" in which:
-            V = np.zeros((56, 56))
-            V[p[1]:p[1] + d[1], p[0]:p[0] + d[0]] = cv2.resize(self.V, d, interpolation=cv2.INTER_AREA)
-            self.V = V
+            oldCrop = self.U[clipOld[1]: clipOld[3], clipOld[0]: clipOld[2]]
+            U_ = np.zeros((56, 56), dtype=np.int32)
+            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
+                U_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
+                    cv2.resize(oldCrop.astype(np.float32),
+                               tuple([clipNew[2] - clipNew[0], clipNew[3] - clipNew[1]]),
+                               interpolation=cv2.INTER_NEAREST).astype(np.int32)
+            self.U = U_
 
         if which is None or "A" in which:
-            A = np.zeros((56, 56))
-            A[p[1]:p[1] + d[1], p[0]:p[0] + d[0]] = cv2.resize(self.A, d, interpolation=cv2.INTER_AREA)
-            self.A = A
+            oldCrop = self.A[clipOld[1]: clipOld[3], clipOld[0]: clipOld[2]]
+            A_ = np.zeros((56, 56), dtype=np.int32)
+            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
+                A_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
+                    cv2.resize(oldCrop.astype(np.float32),
+                               tuple([clipNew[2] - clipNew[0], clipNew[3] - clipNew[1]]),
+                               interpolation=cv2.INTER_NEAREST).astype(np.int32)
+            self.A = A_
 
         self.bounds = newBounds
 
