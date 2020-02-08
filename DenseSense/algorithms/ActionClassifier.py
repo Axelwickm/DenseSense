@@ -2,23 +2,26 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+import DenseSense.utils.YoutubeLoader
+
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-torch.set_default_tensor_type(torch.cuda.FloatTensor)
-print("PyTorch running on "+str(device))
+if torch.cuda.is_available():
+    torch.set_default_tensor_type(torch.cuda.FloatTensor)
+print("ActionClassifier running on: " + str(device))
 
 
-class Action_Classifier(Algorithm):
+class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
     actions = {
-        4  : "dance",
-        11 : "sit",
-        14 : "walk",
-        69 : "hand wave",
+        4:  "dance",
+        11: "sit",
+        14: "walk",
+        69: "hand wave",
         
-        12 : "idle", # stand
-        17 : "idle", # carry/hold (an object)
-        36 : "idle", # lift/pick up
-        37 : "idle", # listen
-        47 : "idle", # put down
+        12: "idle",  # stand
+        17: "idle",  # carry/hold (an object)
+        36: "idle",  # lift/pick up
+        37: "idle",  # listen
+        47: "idle",  # put down
     }
 
     avaFiltered = {}
@@ -44,20 +47,6 @@ class Action_Classifier(Algorithm):
             out = self.linear(out)
             return out
 
-
-    actions = {
-        4  : "dance",
-        11 : "sit",
-        14 : "walk",
-        69 : "hand wave",
-        
-        12 : "idle", # stand
-        17 : "idle", # carry/hold (an object)
-        36 : "idle", # lift/pick up
-        37 : "idle", # listen
-        47 : "idle", # put down
-    }
-
     net = None
     loss_function = None
     optimizer = None
@@ -74,7 +63,9 @@ class Action_Classifier(Algorithm):
     iteration = 0
 
     def __init__(self, db=None):
-        Algorithm.__init__(self, "tracker")
+        print("Initiating ActionClassifier")
+        super().__init__()
+
         actionIDs = self.actions.keys()
         classCount = len(set(self.actions.values()))
 
@@ -93,7 +84,6 @@ class Action_Classifier(Algorithm):
             self.classCursors = dict(self.actions)
             for key in self.actions.keys():
                 self.classCursors[key] = [0, 0]
-    
 
     def extract(self, people, training = False):
         # Person: {"bodyparts":[]}
@@ -122,89 +112,6 @@ class Action_Classifier(Algorithm):
             return labelsPeopleVector
         torch.cuda.empty_cache()        
         return labelsPeople
-
-    def download_video(self, key, starttime, endtime):
-        print("Downloading", key, starttime, endtime)
-        time.sleep(0.2)
-        print(self.videoBuffer[key][1] == None)
-        video = self.db.getData("youtube", str(key)+"|"+str(starttime)+"|"+str(endtime))
-        self.videoBuffer[key][0].set()
-        self.videoBuffer[key][1] = video
-        print("Finished downloading", key)
-
-    def getNextAndBuffer(self, buffer):
-        print("Video buffer keys", self.videoBuffer.keys())
-        print("Upcoming", self.upcoming)
-        s = ""
-        for i in self.upcoming:
-            s += self.ava[i[0]]["key"]+", "
-        print("Upcoming keys: "+s)
-        if self.lastVideo is not None:
-            lastKey = self.ava[self.lastVideo[0]]["key"]
-            for i, j in self.upcoming:
-                if lastKey == self.ava[i]["key"]:
-                    break
-            else:
-                del self.videoBuffer[lastKey]
-                print("------------- UNLOAD VIDEO -- "+lastKey+" --- "+str(len(self.videoBuffer))+" videos left ---")
-
-        # What classes should be choosen
-        whatClasses = np.random.choice(self.actions.keys(), buffer - len(self.upcoming))
-        
-        # Move each cursors of chosen classes to next positions,
-        # and queue all video downloads
-        for c in whatClasses:
-            cursor = self.classCursors[c]
-            key = self.ava[cursor[0]]["key"]
-            starttime = self.ava[cursor[0]]["startTime"]
-            endtime = self.ava[cursor[0]]["endTime"]
-            self.upcoming.append(cursor[:])
-            if key not in self.videoBuffer:
-                self.videoBuffer[key] = [threading.Event(), None]
-                threading.Thread(target=self.download_video, args=(key, starttime, endtime)).start()
-            
-            while True:
-                cursor[1] += 1
-                if len(self.ava[cursor[0]]["people"]) == cursor[1]:
-                    cursor[0] = (cursor[0]+1)%len(self.ava)
-                    cursor[1] = 0
-                person = self.ava[cursor[0]]["people"][cursor[1]]
-                if str(c) in person.keys():
-                    self.classCursors[c] = cursor
-                    break
-
-        # Unload video if it's not appearing again for a while
-        current = self.upcoming[0]
-        self.upcoming = self.upcoming[1:]
-
-        currentKey = self.ava[current[0]]["key"]
-        if self.videoBuffer[currentKey][1] is None:
-            self.videoBuffer[currentKey][0].wait() # Wait for video to have been downloaded
-        
-        if self.videoBuffer[currentKey][1] is False:
-            print("Video "+currentKey+" has been removed. Skipping...")
-            self.lastVideo = None
-            del self.videoBuffer[currentKey] # This video has been removed from YT
-            i = 0
-            while i < len(self.upcoming):
-                ind = self.upcoming[i][0]
-                if currentKey == self.ava[i]["key"]:
-                    del self.upcoming[ind]
-                else:
-                    i += 1
-
-            return self.getNextAndBuffer(buffer)
-        
-        if tuple(current) in self.recent:
-            print("Cursor "+str(current)+" was recently processed. Skipping...")
-            self.lastVideo = None
-            return self.getNextAndBuffer(buffer)
-        
-        self.recent.append(tuple(current))
-        if 15 < len(self.recent):
-            self.recent.popleft()
-        self.lastVideo = current
-        return current, currentKey
 
     def train(self, saveModel, algorithms):
         self.iteration += 1
@@ -258,7 +165,6 @@ class Action_Classifier(Algorithm):
         time.sleep(1)
         t2 = time.time()
         print("DONE PRETENDING")
-        """
 
         # Match how data is passed in during running extraction
         people = []
@@ -277,7 +183,6 @@ class Action_Classifier(Algorithm):
         loss_size.backward()
         self.optimizer.step()
         loss_size_detached = loss_size.item()
-        """
 
         return self.iteration, 0.1, (t2-t1) # Loss, time
 

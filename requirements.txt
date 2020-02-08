@@ -1,3 +1,4 @@
+numpy
 opencv-python
 opencv-contrib-python
 colormath
@@ -11,3 +12,6 @@ tensorboard
 tensorboardx
 Cython
 pycocotools
+youtube_dl
+pafy
+ffmpeg-python
