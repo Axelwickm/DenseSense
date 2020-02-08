@@ -71,7 +71,8 @@ class Person(object):
         if which is None or "S" in which:
             oldCrop = self.S[clipOld[1]: clipOld[3], clipOld[0]: clipOld[2]]
             S_ = np.zeros((56, 56), dtype=np.int32)
-            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
+            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0 \
+                    and newDims[0] != 0 and newDims[1] != 0:
                 S_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
                     cv2.resize(oldCrop.astype(np.float32),
                                newDims, interpolation=cv2.INTER_NEAREST).astype(np.int32)
@@ -80,7 +81,8 @@ class Person(object):
         if which is None or "I" in which:
             oldCrop = self.I[clipOld[1]: clipOld[3], clipOld[0]: clipOld[2]]
             I_ = np.zeros((56, 56), dtype=np.int32)
-            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
+            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0 \
+                    and newDims[0] != 0 and newDims[1] != 0:
                 I_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
                     cv2.resize(oldCrop.astype(np.float32),
                                newDims, interpolation=cv2.INTER_NEAREST).astype(np.int32)
@@ -88,17 +90,29 @@ class Person(object):
 
         if which is None or "U" in which:
             oldCrop = self.U[clipOld[1]: clipOld[3], clipOld[0]: clipOld[2]]
-            U_ = np.zeros((56, 56), dtype=np.int32)
-            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
+            U_ = np.zeros((56, 56), dtype=np.float32)
+            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0 \
+                    and newDims[0] != 0 and newDims[1] != 0:
                 U_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
-                    cv2.resize(oldCrop.astype(np.float32),
-                               newDims, interpolation=cv2.INTER_NEAREST).astype(np.int32)
+                    cv2.resize(oldCrop,
+                               newDims, interpolation=cv2.INTER_NEAREST)
             self.U = U_
+
+        if which is None or "V" in which:
+            oldCrop = self.U[clipOld[1]: clipOld[3], clipOld[0]: clipOld[2]]
+            V_ = np.zeros((56, 56), dtype=np.float32)
+            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0 \
+                    and newDims[0] != 0 and newDims[1] != 0:
+                V_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
+                    cv2.resize(oldCrop,
+                               newDims, interpolation=cv2.INTER_NEAREST)
+            self.V = V_
 
         if which is None or "A" in which:
             oldCrop = self.A[clipOld[1]: clipOld[3], clipOld[0]: clipOld[2]]
             A_ = np.zeros((56, 56), dtype=np.int32)
-            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0:
+            if oldCrop.shape[0] != 0 and oldCrop.shape[1] != 0 \
+                    and newDims[0] != 0 and newDims[1] != 0:
                 A_[clipNew[1]:clipNew[3], clipNew[0]:clipNew[2]] = \
                     cv2.resize(oldCrop.astype(np.float32),
                                newDims, interpolation=cv2.INTER_NEAREST).astype(np.int32)
