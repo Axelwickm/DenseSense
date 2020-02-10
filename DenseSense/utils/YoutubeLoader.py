@@ -35,28 +35,37 @@ class YoutubeLoader:
 
     def get_next_frame(self):
         while True:
+            if self.verbose:
+                print("Read new video {}".format(self.video_cursor))
+
             key, start_time, end_time, _, _ = self.video_queue[self.video_cursor]
+            while key not in self.chunk_buffer:
+                time.sleep(0.05)
+                if self.verbose:
+                    print("Blocking main wait")
+
             lastChunk = False
             chunkCursor = 0
             while not lastChunk:
                 if self.verbose:
-                    print("Read video {}, chunk: {}".format(self.video_cursor, chunkCursor))
-                while key not in self.chunk_buffer:
-                    if self.verbose:
-                        print("Waiting for download...")
-                        time.sleep(0.5)
+                    print("Reading video {}, chunk {}".format(self.video_cursor, chunkCursor))
                 self.chunk_buffer[key][chunkCursor][0].wait()
                 frames, times, inds, lastChunk = self.chunk_buffer[key][chunkCursor][1]
+                if frames is None:
+                    lastChunk = True
+                    continue
 
                 # Release chunk
-                del self.chunk_buffer[key][chunkCursor]
+                self.chunk_buffer[key][chunkCursor] = None
                 self.current_buffer_size -= 1
                 self.download_next_chunk.set()
+                chunkCursor += 1
 
                 for frameIndex, frame in enumerate(frames):
-                    yield frame, self.video_cursor, frameIndex, times[frameIndex]
-                chunkCursor += 1
+                    yield frame, key, self.video_cursor, frameIndex, times[frameIndex]
+
             self.video_cursor = (self.video_cursor+1) % len(self.video_queue)
+            del self.chunk_buffer[key]
 
     def _download(self):
         download_video_cursor = 0
@@ -66,15 +75,19 @@ class YoutubeLoader:
 
             key, start_time, end_time, fps_mean, fps_std = self.video_queue[download_video_cursor]
             if self.verbose:
-                print("Downloading {}, {}->{}".format(key, start_time, end_time))
+                print("\tDownloading video {}, {}->{}".format(key, start_time, end_time))
 
             # FIXME: don't download again if video already in buffer
 
             try:
                 video = pafy.new(key)
             except IOError as e:
-                print("Video probably doesn't exists")
-                raise e
+                if self.verbose:
+                    print("Video probably doesn't exists anymore (or you don't have internet)")
+                download_video_cursor += 1
+                self.chunk_buffer[key] = [[Event(), (None, None, None, True)]]
+                self.chunk_buffer[key][0][0].set()
+                continue
 
             stream = self._findMostFittingStream(video)
             dimensions = stream.dimensions
@@ -83,10 +96,10 @@ class YoutubeLoader:
             duration = end_time - start_time
             hz_mean = 1.0 / fps_mean
             hz_std = hz_mean - 1.0 / (fps_mean + fps_std)
-            frame_times = np.random.normal(hz_mean, hz_std, fps_mean * duration * 2)
-            frame_times = np.sort(np.cumsum(frame_times))
-            first_frame = np.argmax(0 < frame_times)
-            last_frame = np.argmax(duration < frame_times)
+            frame_times = np.random.normal(hz_mean, hz_std, int(fps_mean * duration * 2))
+            frame_times = start_time+np.sort(np.cumsum(frame_times))
+            first_frame = np.argmax(start_time < frame_times)
+            last_frame = np.argmax(end_time < frame_times)
             last_frame = len(frame_times) if last_frame == 0 else last_frame
             frame_times = frame_times[first_frame:last_frame]
 
@@ -95,13 +108,15 @@ class YoutubeLoader:
 
             self.chunk_buffer[key] = [[Event(), ()]]
 
-            while chunk_start < start_time + duration:
+            while chunk_start < end_time:
                 # Get chunk length
                 chunk_end = min(chunk_start + self.chunk_time, end_time)
                 chunk_duration = chunk_end - chunk_start
 
                 if self.verbose:
-                    print("Downloading chunk {}: {}s -> {}s".format(len(self.chunk_buffer[key])-1, chunk_start, chunk_end))
+                    print("\tDownloading video {} chunk {}: {}s -> {}s".format(download_video_cursor,
+                                                                               len(self.chunk_buffer[key])-1,
+                                                                               chunk_start, chunk_end))
 
                 # Download chunk
                 video = ffmpeg.input(stream.url, ss=chunk_start, t=chunk_duration, format="mp4", loglevel="error")
@@ -113,29 +128,36 @@ class YoutubeLoader:
                 fps = downloaded_frames.shape[0] / chunk_duration
                 endFrame = np.argmax(chunk_end < remaining_frame_times)
                 endFrame = len(remaining_frame_times) if endFrame == 0 else endFrame
-                frames_inds = np.floor((remaining_frame_times[:endFrame] - remaining_frame_times[0]) * fps).astype(np.int32)
-                differentFromBefore = np.diff(frames_inds, prepend=[1]) != 0
-                frames_inds = frames_inds[differentFromBefore]
-                true_frame_times = remaining_frame_times[:endFrame][differentFromBefore]
+
+                current_frames = remaining_frame_times[:endFrame]
+                remaining_frame_times = remaining_frame_times[endFrame:]
+                frames_inds = np.floor((current_frames - chunk_start) * fps).astype(np.int32)
+
+                differentFromPrevious = np.diff(frames_inds, prepend=[1]) != 0
+                frames_inds = frames_inds[differentFromPrevious]
+                current_frames = current_frames[differentFromPrevious]
+
                 filteredFrames = downloaded_frames[frames_inds]
 
                 # Update loop
-                chunk_start += self.chunk_time
-                remaining_frame_times = remaining_frame_times[endFrame:]
+                chunk_start += chunk_duration
 
                 # Pass on data
-                lastChunk = start_time + duration < chunk_start
-                self.chunk_buffer[key][-1][1] = filteredFrames, true_frame_times, frames_inds, lastChunk
+                lastChunk = end_time <= chunk_start
+                self.chunk_buffer[key][-1][1] = filteredFrames, current_frames, frames_inds, lastChunk
                 self.chunk_buffer[key].append([Event(), ()])
                 self.chunk_buffer[key][-2][0].set()
                 self.current_buffer_size += 1
-                print("Chunks downloaded: "+str(self.current_buffer_size))
+                if self.verbose:
+                    print("\tTotal chunks now buffered: "+str(self.current_buffer_size))
                 if self.chunk_buffer_max_size <= self.current_buffer_size:
-                    print("Waiting to download next chunk")
+                    if self.verbose:
+                        print("\tWaiting to download next chunk")
                     self.download_next_chunk.clear()
                     self.download_next_chunk.wait()
 
-            print("Finished downloading", key)
+            if self.verbose:
+                print("\tFinished downloading", key)
             download_video_cursor = (download_video_cursor+1) % len(self.video_queue)
 
     def _findMostFittingStream(self, video):
@@ -155,19 +177,22 @@ class YoutubeLoader:
 if __name__ == "__main__":
     import cv2
 
-    yl = YoutubeLoader(verbose=True)
-    yl.queue_video("dVPqWh39HJ0", 0, 20)
+    yl = YoutubeLoader(chunk_buffer_size=15, verbose=True)
+    yl.queue_video("dVPqWh39HJ0", 0, 10)
     yl.queue_video("IzIBpFDRr5g", 20, 30)
     yl.queue_video("DSYXObynLWY", 30, 70)
-    yl.queue_video("FLKSNWhffhf", 30, 70)  # Doesn't exist
+    yl.queue_video("Idontexiste", 30, 70)
     yl.queue_video("UnETVMI4tY8", 0, 10)
     yl.queue_video("3DBQxxvuWYA", 10, 11)
     yl.queue_video("ERg3JvmnkUI", 0.02, 30)
-    yl.queue_video("hzd53i7hhhA", 0, 700)
+    yl.queue_video("Ze25iPU5f-M", 0.02, 0.5)
+    yl.queue_video("hzd53i7hhhA", 0, 70)
+    yl.queue_video("bpm-YTucLrA", 5, 20)
+    yl.queue_video("vc8MddDFRw4", 0, 20)
+    yl.queue_video("-wPTadJB5As", 5, 20)
 
-    for frame, videoIndex, frameIndex, frameTime in yl.get_next_frame():
-        print("Main from video {}, frame: {}".format(videoIndex, frameIndex))
+    for frame, videoKey, videoIndex, frameIndex, frameTime in yl.get_next_frame():
         cv2.imshow("frame", frame)
-        cv2.waitKey(200)
+        cv2.waitKey(30)
 
 
