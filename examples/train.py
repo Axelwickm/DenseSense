@@ -2,8 +2,9 @@ from argparse import ArgumentParser
 import os
 
 parser = ArgumentParser()
+trainable = ["DescriptionExtractor", "Sanitizer", "ActionClassifier"]
 parser.add_argument("algorithm", help="Name of algorithm to train",
-                    choices=["DescriptionExtractor", "Sanitizer"], type=str)
+                    choices=trainable, type=str)
 parser.add_argument("-m", "--model", help="Model path", default="./models/", type=str)
 parser.add_argument("-o", "--override", help="If model should be overridden", default=0, type=int)
 parser.add_argument("-e", "--epochs", help="How many epochs to train", default=50, type=int)
@@ -29,7 +30,6 @@ def main():
     if args.algorithm == "DescriptionExtractor":
         from DenseSense.algorithms.DescriptionExtractor import DescriptionExtractor
         descriptionExtractor = DescriptionExtractor()
-        # FIXME: should be put in a function
         if alreadyExists and not args.override:
             print("Will keep working on existing model")
             descriptionExtractor.loadModel(modelPath)
@@ -70,6 +70,28 @@ def main():
         sanitizer.train(epochs=args.epochs, dataset=dataset, learningRate=args.learningRate,
                         useDatabase=args.lmdb, printUpdateEvery=args.print,
                         visualize=args.visualize, tensorboard=tb)
+
+    elif args.algorithm == "ActionClassifier":
+        from DenseSense.algorithms.ActionClassifier import ActionClassifier
+        ac = ActionClassifier()
+        if alreadyExists and not args.override:
+            print("Will keep working on existing model")
+            ac.loadModel(modelPath)
+        ac.saveModel(modelPath)
+
+        dataset = "val2017"
+        if args.dataset is not None:
+            dataset = args.dataset
+
+        try:
+            tb = int(args.tensorboard)
+            tb = True if 0 < tb else False
+        except ValueError:
+            tb = args.tensorboard
+
+        ac.trainAutoEncoder(epochs=args.epochs, dataset=dataset, learningRate=args.learningRate,
+                            useLMDB=args.lmdb, printUpdateEvery=args.print,
+                            visualize=args.visualize, tensorboard=tb)
 
 
 if __name__ == '__main__':

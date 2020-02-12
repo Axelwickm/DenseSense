@@ -6,8 +6,5 @@ class Algorithm(): # Abstract class
     def extract(self):
         pass  # To be overridden
 
-    def train(self):
-        pass  # To be overridden
-
     def renderDebug(self):
         pass  # To be overridden
