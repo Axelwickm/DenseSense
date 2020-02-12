@@ -1,8 +1,17 @@
+import json
+import os
+
+import DenseSense.utils.YoutubeLoader
+from DenseSense.utils.LMDBHelper import LMDBHelper
+
+import numpy as np
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import DenseSense.utils.YoutubeLoader
+
+topDir = os.path.realpath(os.path.dirname(__file__)+"/../..")
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 if torch.cuda.is_available():
@@ -36,7 +45,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
     class Network(nn.Module):
         def __init__(self, outputs):
-            super(Action_Classifier.Network, self).__init__()
+            super(ActionClassifier.Network, self).__init__()
 
             self.lstm = nn.LSTM(25*2, 10)
             # TODO: activation function?
@@ -53,136 +62,113 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
     currentPeople = {}
 
     classCursors = None
-    upcoming = []
-    videoBuffer = {}
-    lastVideo = None
-    recent = deque()
 
-    db = None
-    epoch = 0
-    iteration = 0
-
-    def __init__(self, db=None):
+    def __init__(self):
         print("Initiating ActionClassifier")
         super().__init__()
 
         actionIDs = self.actions.keys()
         classCount = len(set(self.actions.values()))
 
-        self.net = Action_Classifier.Network(classCount)
-        self.loss_function = nn.NLLLoss()
-        self.optimizer = torch.optim.SGD(self.net.parameters(), lr=0.1)
+        self._modelPath = None
+        self.model = None
+        self._training = False
 
-        if db is not None:
-            self.db = db
+    def loadModel(self, modelPath):
+        self._modelPath = modelPath
+        print("Loading ActionClassifier file from: " + self._modelPath)
+        self.model.load_state_dict(torch.load(self._modelPath, map_location=device))
+        self.model.to(device)
 
-            # Extract Ava
-            db.getData("ava", json.dumps(actionIDs))
-            self.ava = db.getAllLoaded()["ava"]
+    def saveModel(self, modelPath):
+        if modelPath is None:
+            print("Don't know where to save model")
+        self._modelPath = modelPath
+        print("Saving ActionClassifier model to: "+self._modelPath)
+        torch.save(self.model.state_dict(), self._modelPath)
 
-            # Initiate cursors
-            self.classCursors = dict(self.actions)
-            for key in self.actions.keys():
-                self.classCursors[key] = [0, 0]
+    def _initTraining(self, learningRate, datasetName, useLMDB):
+        self.datasetName = datasetName
 
-    def extract(self, people, training = False):
-        # Person: {"bodyparts":[]}
-        labelsPeople = []
-        labelsPeopleVector = []
+        if datasetName is "Coco":
+            from torchvision import transforms
+            from torchvision.datasets import CocoDetection
 
-        seenPeople = set()
+            from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
+            from DenseSense.algorithms.Sanitizer import Sanitizer
 
-        # Check if new person, if so, add another instance of Network
-        for i in range(len(people)):
-            person = people[i]
-            seenPeople.append(person["id"])
-            if person is None:
-                labelsPeople.append(None)
-                labelsPeopleVector.append(None)
-                continue
-            
-            #if person["id"] not in self. 
+            annFile = topDir + '/annotations/instances_{}.json'.format(datasetName)
+            cocoPath = topDir + '/data/{}'.format(datasetName)
 
-        for key in self.currentPeople:
-            if key not in seenPeople:
-                del self.seenPeople[key]
+            self.dataset = CocoDetection(cocoPath, annFile, transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: x.permute(1, 2, 0)),
+                transforms.Lambda(lambda x: (x * 255).byte().numpy()),
+                transforms.Lambda(lambda x: x[:, :, ::-1])
+            ]))
 
-        # Run each network for each person
-        if training:
-            return labelsPeopleVector
-        torch.cuda.empty_cache()        
-        return labelsPeople
+            self.denseposeExtractor = DensePoseWrapper()
+            self.sanitizer = Sanitizer()
+            self.sanitizer.loadModel(topDir + "/models/Sanitizer.pth")
 
-    def train(self, saveModel, algorithms):
-        self.iteration += 1
-        current, key = self.getNextAndBuffer(2)
-        video = self.videoBuffer[key]
-        person = self.ava[current[0]]["people"][current[1]]
-        annotatedFrames = person.items()
-        annotatedFrames.sort(key=lambda x: int(x[0]))
-        annotatedFrames = filter(lambda x: x[1] != [], annotatedFrames)
+        if useLMDB:
+            self.useLMDB = True
+            self.lmdb = LMDBHelper("a")
+            self.lmdb.verbose = False
 
-        print("Current is", key)
-        print("Cursor is", current)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learningRate, ansgrad=True)
+        self.loss_function = torch.nn.MSELoss()
 
-        # TODO: grab the right frames from the video
-        for annFrame in annotatedFrames:
-            print("Ann frame", annFrame)
-            print(video)
-            print(len(video))
-            for frame in video[int(annFrame[0]):int(annFrame[0])+10]: # Assuming 10 fps
-                print("FRAME IN VIDEO!")
-                # Extract the bounding box of the image
-                lower = frame["bbox"][:2]*frame.shape - np.array([50.0, 50.0])
-                upper = frame["bbox"][2:]*frame.shape + np.array([50.0, 50.0])
-                print(lower)
-                print(upper)
-                lower = lower.clip(min=0)
-                upper[0] = upper[0].clip(max=frame.shape[1])
-                upper[1] = upper[1].clip(max=frame.shape[0])
-                frame = frame[int(lower[1]):int(upper[1]), int(lower[0]):int(upper[0])]
+    def _load(self, index):
+        if self.datasetName is "Coco":
+            cocoImage = self.dataset[index]
+            if self.useLMDB:
+                people = self.lmdb.get(ActionClassifier, "coco" + str(index))
 
-                boxes, bodys = algorithms["DP"].extract(frame)
-                people, mergedIUVs = algorithms["DE"].extract(boxes, bodys, frame)
-                # TODO: Find the biggest one
-                person = []
-                
-                # TODO: give person new id if more than 1 seconds have passed
+            if people is None:
+                ROIs = self.denseposeExtractor.extract(cocoImage[0])
+                ROIs = self.sanitizer.extract(ROIs)
+                if self.useLMDB:
+                    self.lmdb.save(ActionClassifier, "coco" + str(index), ROIs)
 
+    def train(self, epochs=100, learningRate=0.005, dataset="Coco",
+              useLMDB=True, printUpdateEvery=40,
+              visualize=False, tensorboard=False):
 
-                # Reformat labels
+        self._training = True
+        self._initTraining(learningRate, dataset, useLMDB)
 
-                # Feed into network
-                labels = self.extract(person, True)
+        # Tensorboard setup
+        if tensorboard or type(tensorboard) == str:
+            from torch.utils.tensorboard import SummaryWriter
 
-                # Train
+            if type(tensorboard) == str:
+                writer = SummaryWriter(topDir+"/data/tensorboard/"+tensorboard)
+            else:
+                writer = SummaryWriter(topDir+"/data/tensorboard/")
+            tensorboard = True
 
-            
-        
-        # Process video
-        print("PRETEND PROCESSING "+str(key))
-        t1 = time.time()
-        time.sleep(1)
-        t2 = time.time()
-        print("DONE PRETENDING")
+        # Start the training process
+        Iterations = len(self.dataset)
 
-        # Match how data is passed in during running extraction
-        people = []
-        lastTimestamp = None
-        for frame in frames:
-            if lastTimestamp is not None:
-                if int(frame[0]) - lastTimestamp > 3: # if more than 3 seconds have passed
-                    people
-            lastTimestamp = int(frame[0])
+        print("Starting training")
+        for epoch in range(epochs):
+            epochLoss = np.float64(0)
+            for i in range(Iterations):
+                predictions = None
+                groundtruth = None
 
-        startTime = time.time()
-        output = self.extract(people) # Got texture from drive
-        endTime = time.time()
+                lossSize = self.lossFunction(predictions, groundtruth)
+                lossSize.backward()
+                self.optimizer.step()
+                self.optimizer.zero_grad()
+                lossSize = lossSize.cpu().item()
 
-        loss_size = self.criterion(output, labels)
-        loss_size.backward()
-        self.optimizer.step()
-        loss_size_detached = loss_size.item()
+                epochLoss += lossSize / Iterations
+                if (i - 1) % printUpdateEvery == 0:
+                    print("Iteration {} / {}, epoch {} / {}".format(i, Iterations, epoch, epochs))
+                    print("Loss size: {}\n".format(lossSize / printUpdateEvery))
 
-        return self.iteration, 0.1, (t2-t1) # Loss, time
-
+                if tensorboard:
+                    absI = i + epoch * Iterations
+                    writer.add_scalar("Loss size", lossSize, absI)
