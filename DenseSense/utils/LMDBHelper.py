@@ -15,8 +15,8 @@ class LMDBHelper:
         self.databases = {}
         self.prefix = prefix
 
-    def get(self, Type, key):  # TODO: None-key to get whole database at once
-        TN = self.prefix + Type.__name__  # Filename
+    def get(self, db_name, key):  # TODO: None-key to get whole database at once
+        TN = self.prefix + db_name  # Filename
         if TN not in self.databases:      # Check if already opened
             self.openDatabase(TN)
 
@@ -33,17 +33,17 @@ class LMDBHelper:
             print("Loaded LMDB data {} : {}".format(TN, key))
         return data
 
-    def save(self, Type, key, data):
+    def save(self, db_name, key, data):
         assert self.mode not in ["r", "read", "readonly"], \
             "LMDB_helper in readonly mode"
-        TN = self.prefix + Type.__name__  # Filename
+        TN = self.prefix + db_name  # Filename
         if TN not in self.databases:      # Check if already opened
             self.openDatabase(TN)
 
         key = str(key).encode('ascii')
 
         if self.mode in ["a", "append"]:  # Make sure not to override
-            existing = self.get(Type, key)
+            existing = self.get(db_name, key)
             if existing is not None:
                 return False
             del existing

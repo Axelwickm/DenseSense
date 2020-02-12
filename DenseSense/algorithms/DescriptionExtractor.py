@@ -398,20 +398,20 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
         cocoImage = self.dataset[index]
         ROIs = None
         if self.useDatabase:
-            ROIs = self.lmdb.get(DensePoseWrapper, "deepfashion2" + str(index))
+            ROIs = self.lmdb.get("DensePoseWrapper_deepfashion2", str(index))
         if ROIs is None:
             ROIs = self.denseposeExtractor.extract(cocoImage[0])
             ROIs = self.sanitizer.extract(ROIs)
             if self.useDatabase:
-                self.lmdb.save(DensePoseWrapper, "deepfashion2" + str(index), ROIs)
+                self.lmdb.save("DensePoseWrapper_deepfashion2", str(index), ROIs)
 
         peopleTextures = None
         if self.useDatabase:
-            peopleTextures = self.lmdb.get(UVMapper, "deepfashion2" + str(index))
+            peopleTextures = self.lmdb.get("UVMapper_deepfashion2", str(index))
         if peopleTextures is None:
             peopleTextures = self.uvMapper.extract(ROIs, cocoImage[0])
             if self.useDatabase:
-                self.lmdb.save(UVMapper, "deepfashion2" + str(index), peopleTextures)
+                self.lmdb.save("UVMapper_deepfashion2", str(index), peopleTextures)
 
         return ROIs, peopleTextures, cocoImage[1]
 

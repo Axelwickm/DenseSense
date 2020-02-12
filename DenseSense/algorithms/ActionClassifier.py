@@ -93,7 +93,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
         if self.datasetName in ActionClassifier.COCO_Datasets:
             people = None
             if self.useLMDB:
-                people = self.lmdb.get(ActionClassifier, "coco" + str(index))
+                people = self.lmdb.get("ActionClassifier_AE_coco", str(index))
 
             if people is None:
                 # Load image from disk and process
@@ -102,7 +102,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                 people = self.denseposeExtractor.extract(image)
                 people = self.sanitizer.extract(people)
                 if self.useLMDB:
-                    self.lmdb.save(ActionClassifier, "coco" + str(index), people)
+                    self.lmdb.save("ActionClassifier_AE_coco", str(index), people)
             return people
 
     def trainAutoEncoder(self, epochs=100, learningRate=0.005, dataset="Coco",
