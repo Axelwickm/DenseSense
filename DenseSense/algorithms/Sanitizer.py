@@ -344,12 +344,12 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                 generated = False
                 ROIs = None
                 if useDatabase:
-                    ROIs = self.lmdb.get("DensePoseWrapper", "coco" + str(cocoImage["id"]))
+                    ROIs = self.lmdb.get("DensePoseWrapper_Coco", str(cocoImage["id"]))
                 if ROIs is None:
                     ROIs = self.denseposeExtractor.extract(image)
                     generated = True
                 if useDatabase and generated:
-                    self.lmdb.save("DensePoseWrapper", "coco" + str(cocoImage["id"]), ROIs)
+                    self.lmdb.save("DensePoseWrapper_Coco", str(cocoImage["id"]), ROIs)
 
                 # Run prediction
                 self._generateMasks(ROIs)

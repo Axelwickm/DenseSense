@@ -92,17 +92,19 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
     def _load(self, index):
         if self.datasetName in ActionClassifier.COCO_Datasets:
             people = None
+            # Load image from disk and process
+            cocoImage = self.coco.loadImgs(self.dataset[index])[0]
+
             if self.useLMDB:
-                people = self.lmdb.get("ActionClassifier_AE_coco", str(index))
+                people = self.lmdb.get("DensePoseWrapper_Sanitized_Coco", str(cocoImage["id"]))
 
             if people is None:
-                # Load image from disk and process
-                cocoImage = self.coco.loadImgs(self.dataset[index])[0]
+
                 image = cv2.imread(self.cocoPath + "/" + cocoImage["file_name"])
                 people = self.denseposeExtractor.extract(image)
                 people = self.sanitizer.extract(people)
                 if self.useLMDB:
-                    self.lmdb.save("ActionClassifier_AE_coco", str(index), people)
+                    self.lmdb.save("DensePoseWrapper_Sanitized_Coco", str(cocoImage["id"]), people)
             return people
 
     def trainAutoEncoder(self, epochs=100, learningRate=0.005, dataset="Coco",
@@ -190,6 +192,9 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                 if tensorboard:
                     absI = i + epoch * total_iterations
                     writer.add_scalar("Loss size", lossSize, absI)
+
+            print("Finished epoch {} / {}. Loss size:".format(epoch, epochs, epochLoss))
+            self.saveModel(self._modelPath)
 
 
 class Flatten(torch.nn.Module):
