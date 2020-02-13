@@ -9,13 +9,11 @@ import time
 
 
 class YoutubeLoader:
-    def __init__(self, chunk_buffer_size=5, dimensions=(400, 300),
-                 verbose=False, save_to_lmdb=False):
+    def __init__(self, chunk_buffer_size=5, dimensions=(400, 300), verbose=False):
         print("Starting YoutubeLoader")
         self.chunk_buffer_max_size = chunk_buffer_size
         self.goal_dimensions = np.array(dimensions)
         self.verbose = verbose
-        self.save_to_lmdb = save_to_lmdb
 
         self.current_buffer_size = 0
         self.chunk_buffer = {}
@@ -33,7 +31,7 @@ class YoutubeLoader:
             print("Queueing video: {}, {}->{}".format(key, start_time, end_time))
         self.video_queue.append((key, start_time, end_time, fps_mean, fps_std))
 
-    def get_next_frame(self):
+    def frames(self):
         while True:
             if self.verbose:
                 print("Read new video {}".format(self.video_cursor))
@@ -49,6 +47,11 @@ class YoutubeLoader:
             while not lastChunk:
                 if self.verbose:
                     print("Reading video {}, chunk {}".format(self.video_cursor, chunkCursor))
+                    print("mmmmmmmmmm")
+                    print("key", key, "chunkCursor", chunkCursor)
+                    print("cbkey", self.chunk_buffer[key])
+                    print("cbkeycc", self.chunk_buffer[key][chunkCursor])
+                    print("babababa\n")
                 self.chunk_buffer[key][chunkCursor][0].wait()
                 frames, times, inds, lastChunk = self.chunk_buffer[key][chunkCursor][1]
                 if frames is None:
@@ -191,7 +194,7 @@ if __name__ == "__main__":
     yl.queue_video("vc8MddDFRw4", 0, 20)
     yl.queue_video("-wPTadJB5As", 5, 20)
 
-    for frame, videoKey, videoIndex, frameIndex, frameTime in yl.get_next_frame():
+    for frame, videoKey, videoIndex, frameIndex, frameTime in yl.frames():
         cv2.imshow("frame", frame)
         cv2.waitKey(30)
 

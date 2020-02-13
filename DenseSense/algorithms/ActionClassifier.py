@@ -37,6 +37,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
     }
 
     COCO_Datasets = ["val2014", "train2014", "val2017", "train2017"]
+    AVA_Datasets = ["ava_val", "ava_train", "ava_val_predictive", "ava_train_predictive"]
 
     def __init__(self):
         print("Initiating ActionClassifier")
@@ -62,13 +63,19 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
     def _initTraining(self, learningRate, datasetName, useLMDB):
         self.datasetName = datasetName
 
+        from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
+        from DenseSense.algorithms.Sanitizer import Sanitizer
+        from DenseSense.algorithms.Tracker import Tracker
+
+        self.denseposeExtractor = DensePoseWrapper()
+        self.sanitizer = Sanitizer()
+        self.sanitizer.loadModel(topDir + "/models/Sanitizer.pth")
+        self.tracker = Tracker()
+
         if datasetName in ActionClassifier.COCO_Datasets:
             print("Loading COCO dataset: "+datasetName)
             from pycocotools.coco import COCO
             from os import path
-
-            from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
-            from DenseSense.algorithms.Sanitizer import Sanitizer
 
             annFile = topDir + '/annotations/instances_{}.json'.format(datasetName)
             self.cocoPath = topDir + '/data/{}'.format(datasetName)
@@ -77,12 +84,46 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             personCatID = self.coco.getCatIds(catNms=['person'])[0]
             self.dataset = self.coco.getImgIds(catIds=personCatID)
 
-            self.denseposeExtractor = DensePoseWrapper()
-            self.sanitizer = Sanitizer()
-            self.sanitizer.loadModel(topDir + "/models/Sanitizer.pth")
+        elif datasetName in ActionClassifier.AVA_Datasets:
+            print("Loading AVA dataset: "+datasetName)
+            import csv
+            from collections import defaultdict
+            from DenseSense.utils.YoutubeLoader import  YoutubeLoader
+
+            annFile = topDir + '/annotations/{}.csv'.format(datasetName)
+            self.dataset = defaultdict(lambda: defaultdict(defaultdict))
+            with open(annFile, 'r') as csvFile:
+                reader = csv.reader(csvFile)
+                for row in reader:
+                    video, t, x1, y1, x2, y2, action, person = row
+                    actions = {action}
+                    if person in self.dataset[video][t]:
+                        actions = actions.union(self.dataset[video][t][person]["actions"])
+                    self.dataset[video][t][person] = {
+                        "bbox": (x1, y1, x2, y2),
+                        "actions": actions
+                    }
+
+            ordered_data = []
+            for key, video in self.dataset.items():
+                ordered_data.append((key, []))
+                for t, annotation in video.items():
+                    ordered_data[-1][1].append((int(t), annotation))
+                ordered_data[-1][1].sort(key=lambda x: x[0])
+
+            self.dataset = ordered_data
+
+            self.youtubeLoader = YoutubeLoader()
+            for key, video in self.dataset:
+                self.youtubeLoader.queue_video(key, video[0][0], video[-1][0])
+
+            self.current_video_index = 0
+            self.current_video_frame_index = 0
+        else:
+            raise Exception("Unknown dataset")
 
         self.useLMDB = useLMDB
-        if useLMDB: # FIXME: make work
+        if useLMDB:
             self.lmdb = LMDBHelper("a")
             self.lmdb.verbose = False
 
@@ -94,18 +135,78 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             people = None
             # Load image from disk and process
             cocoImage = self.coco.loadImgs(self.dataset[index])[0]
-
             if self.useLMDB:
                 people = self.lmdb.get("DensePoseWrapper_Sanitized_Coco", str(cocoImage["id"]))
 
             if people is None:
-
                 image = cv2.imread(self.cocoPath + "/" + cocoImage["file_name"])
+                if image is None:
+                    print(cocoImage)
+                    raise Exception("Could not find image: "+str(index))
+
                 people = self.denseposeExtractor.extract(image)
                 people = self.sanitizer.extract(people)
                 if self.useLMDB:
                     self.lmdb.save("DensePoseWrapper_Sanitized_Coco", str(cocoImage["id"]), people)
-            return people
+            return people, cocoImage
+
+        elif self.datasetName in ActionClassifier.AVA_Datasets:
+            data = None
+            people, frameTime = None, None
+            key = self.dataset[self.current_video_index][0]
+            self.youtubeLoader.verbose = True
+
+            if self.useLMDB:
+                data = self.lmdb.get("DensePoseWrapper_Sanitized_AVA",
+                                     str(key)+"_"+str(self.current_video_frame_index))
+
+            if data is None:
+                print("generating")
+                image, yt_key, yt_videoIndex, yt_frameIndex, frameTime = next(self.youtubeLoader.frames())
+
+                people = self.denseposeExtractor.extract(image)
+                people = self.sanitizer.extract(people)
+
+                if self.useLMDB:
+                    self.lmdb.save("DensePoseWrapper_Sanitized_AVA",
+                                   str(key) + "_" + str(self.current_video_frame_index), (people, frameTime))
+
+                if key != yt_key:
+                    raise Exception("YoutubeLoader and ActionClassifier video keys don't match")
+
+                if self.current_video_frame_index != yt_frameIndex:
+                    raise Exception("YoutubeLoader and ActionClassifier frame indexes don't match")
+
+            else:
+                people, frameTime = data
+                self.youtubeLoader.blocking = False # TODO: implement
+                _, yt_key, _, yt_frameIndex, _ = next(self.youtubeLoader.frames())
+                print("skip a")
+                while key != yt_key and self.current_video_frame_index != yt_frameIndex:
+                    print("skip b")
+                    _, yt_key, _, yt_frameIndex, _ = next(self.youtubeLoader.frames())
+                self.youtubeLoader.blocking = True
+
+            timestamp = np.round(frameTime)
+            avaAnn = None
+
+            sameTimestamp = [v[1] for v in self.dataset[self.current_video_index][1] if v[0] == timestamp]
+            print("st")
+            if len(sameTimestamp) == 1:
+                avaAnn = sameTimestamp[0]
+                print(avaAnn)
+            else:
+                print("Found no ava ann")
+
+            # Change increment video and frame
+            self.current_video_frame_index += 1
+            if len(self.dataset[self.current_video_index]) == self.current_video_frame_index:
+                self.current_video_frame_index = 0
+                self.current_video_index += 1
+                if len(self.dataset[self.current_video_index]) == self.current_video_index:
+                    self.current_video_index = 0
+
+            return people, avaAnn
 
     def trainAutoEncoder(self, epochs=100, learningRate=0.005, dataset="Coco",
                          useLMDB=True, printUpdateEvery=40,
@@ -128,11 +229,18 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
         visualize_counter = 0
         open_windows = set()
 
+        # For predictive coding training
+        current_video = None
+        last_time = None
+
         print("Starting training")
         for epoch in range(epochs):
             epochLoss = np.float64(0)
             for i in range(total_iterations):
-                people = self._load(i)
+                people, annotation = self._load(i)
+                if "predictive" in self.datasetName:
+                    # Load next
+                    nextS = 0
 
                 if len(people) == 0:
                     continue
@@ -154,7 +262,11 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                 out = self._AE_model.decode(embedding)
 
                 # Optimize
-                lossSize = self.loss_function(out, S)
+                if "predictive" in self.datasetName:
+                    lossSize = self.loss_function(out, nextS)
+                else:
+                    lossSize = self.loss_function(out, S)
+
                 lossSize.backward()
                 self.optimizer.step()
                 self.optimizer.zero_grad()
