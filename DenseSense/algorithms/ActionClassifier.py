@@ -176,8 +176,8 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                         emb = ((embedding[index].detach().cpu().numpy()*0.5+1.0)*255).astype(np.uint8)
                         emb = np.expand_dims(emb, axis=0)
                         emb = np.repeat(emb, repeats=14, axis=0).T
-                        emb = np.repeat(emb, repeats=5, axis=0)
-                        emb = np.vstack((emb, np.zeros((6, 14), dtype=np.uint8)))
+                        emb = np.repeat(emb, repeats=10, axis=0)
+                        emb = np.vstack((emb, np.zeros((56-5*10, 14), dtype=np.uint8)))
                         comparison = np.hstack((inpS, emb, outS))
                         comparison = cv2.applyColorMap(comparison, cv2.COLORMAP_JET)
                         cv2.imshow("person "+str(index), comparison)
@@ -227,11 +227,11 @@ class AutoEncoder(nn.Module):
             Flatten(),
             nn.Linear(784, 100),
             nn.ReLU(True),
-            nn.Linear(100, 10)
+            nn.Linear(100, 5)
         )
 
         self.decoder = nn.Sequential(
-            nn.Linear(10, 100),
+            nn.Linear(5, 100),
             nn.ReLU(True),
             nn.Linear(100, 784),
             nn.ReLU(True),
@@ -245,5 +245,57 @@ class AutoEncoder(nn.Module):
     def encode(self, S):
         return self.encoder(S)
 
-    def decode(self, x):
+    def decode(self, x, delta_time=0):
+        # TODO: concat delta time
         return self.decoder(x)
+
+
+if __name__ == '__main__':
+    # Experimentation mode
+    from argparse import ArgumentParser
+    parser = ArgumentParser("Experimentation with trained models")
+    parser.add_argument("mode", help="Mode", choices=["AutoEncoder"], type=str)
+    parser.add_argument("-ae", "--ae_model", help="AutoEncoder model path", default="./models/", type=str)
+    args = parser.parse_args()
+
+    if args.mode in ["AutoEncoder"]:
+        modelPath = args.ae_model
+        if os.path.isdir(modelPath):
+            modelPath = os.path.join(modelPath, "ActionClassifier_AutoEncoder.pth")
+        alreadyExists = os.path.exists(modelPath)
+
+        ae = AutoEncoder()
+        ae.load_state_dict(torch.load(modelPath, map_location=device))
+        ae.to(device)
+
+        if args.mode == "AutoEncoder":
+            embedding = torch.zeros((1, 5)).to(device)
+            selected = 0
+            while True:
+                out = ae.decode(embedding)
+                outS = (out[0, 0].detach() * 255).cpu().to(torch.uint8).numpy()
+                emb = ((embedding[0].detach().cpu().numpy() * 0.5 + 1.0) * 255).astype(np.uint8)
+                emb = np.expand_dims(emb, axis=0)
+                emb = np.repeat(emb, repeats=14, axis=0).T
+                emb = np.repeat(emb, repeats=10, axis=0)
+                emb = np.vstack((emb, np.zeros((56-5*10, 14), dtype=np.uint8)))
+                comparison = np.hstack((emb, outS))
+                comparison = cv2.applyColorMap(comparison, cv2.COLORMAP_JET)
+                cv2.imshow("Chosen embedding to person", comparison)
+
+                k = cv2.waitKey(0)
+
+                if k == 27:
+                    break  # Esc
+
+                if 48 <= k <= (48+embedding.shape[1]-1):
+                    selected = k - 48
+                    print("Selected {}".format(selected))
+
+                if k == 82 or k == 119:
+                    embedding[0, selected] += 0.05
+                    print(embedding[0])
+
+                if k == 84 or k == 115:
+                    embedding[0, selected] -= 0.05
+                    print(embedding[0])
