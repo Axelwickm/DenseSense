@@ -1,11 +1,13 @@
 import json
 import os
+from copy import copy
 
 import cv2
 
 import DenseSense.algorithms.Algorithm
 import DenseSense.utils.YoutubeLoader
 from DenseSense.utils.LMDBHelper import LMDBHelper
+from DenseSense.algorithms.Tracker import Tracker
 
 import numpy as np
 
@@ -65,12 +67,11 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
         from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
         from DenseSense.algorithms.Sanitizer import Sanitizer
-        from DenseSense.algorithms.Tracker import Tracker
 
         self.denseposeExtractor = DensePoseWrapper()
         self.sanitizer = Sanitizer()
         self.sanitizer.loadModel(topDir + "/models/Sanitizer.pth")
-        self.tracker = Tracker()
+
 
         if datasetName in ActionClassifier.COCO_Datasets:
             print("Loading COCO dataset: "+datasetName)
@@ -88,9 +89,9 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             print("Loading AVA dataset: "+datasetName)
             import csv
             from collections import defaultdict
-            from DenseSense.utils.YoutubeLoader import  YoutubeLoader
+            from DenseSense.utils.YoutubeLoader import YoutubeLoader
 
-            annFile = topDir + '/annotations/{}.csv'.format(datasetName)
+            annFile = topDir + "/annotations/{}.csv".format(datasetName.replace("_predictive", ""))
             self.dataset = defaultdict(lambda: defaultdict(defaultdict))
             with open(annFile, 'r') as csvFile:
                 reader = csv.reader(csvFile)
@@ -113,12 +114,14 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
             self.dataset = ordered_data
 
-            self.youtubeLoader = YoutubeLoader()
+            self.youtubeLoader = YoutubeLoader(verbose=False)
             for key, video in self.dataset:
                 self.youtubeLoader.queue_video(key, video[0][0], video[-1][0])
 
             self.current_video_index = 0
             self.current_video_frame_index = 0
+
+            self.tracker = Tracker()
         else:
             raise Exception("Unknown dataset")
 
@@ -152,61 +155,46 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
         elif self.datasetName in ActionClassifier.AVA_Datasets:
             data = None
-            people, frameTime = None, None
+            people, frame_time, is_last = None, None, False
             key = self.dataset[self.current_video_index][0]
-            self.youtubeLoader.verbose = True
 
             if self.useLMDB:
                 data = self.lmdb.get("DensePoseWrapper_Sanitized_AVA",
                                      str(key)+"_"+str(self.current_video_frame_index))
 
             if data is None:
-                print("generating")
-                image, yt_key, yt_videoIndex, yt_frameIndex, frameTime = next(self.youtubeLoader.frames())
+                image, frame_time, is_last = self.youtubeLoader.get(self.current_video_index,
+                                                                    self.current_video_frame_index)
 
                 people = self.denseposeExtractor.extract(image)
                 people = self.sanitizer.extract(people)
 
-                if self.useLMDB:
+                if self.useLMDB:  # Save processed data
                     self.lmdb.save("DensePoseWrapper_Sanitized_AVA",
-                                   str(key) + "_" + str(self.current_video_frame_index), (people, frameTime))
-
-                if key != yt_key:
-                    raise Exception("YoutubeLoader and ActionClassifier video keys don't match")
-
-                if self.current_video_frame_index != yt_frameIndex:
-                    raise Exception("YoutubeLoader and ActionClassifier frame indexes don't match")
+                                   str(key) + "_" + str(self.current_video_frame_index), (people, frame_time))
 
             else:
-                people, frameTime = data
-                self.youtubeLoader.blocking = False # TODO: implement
-                _, yt_key, _, yt_frameIndex, _ = next(self.youtubeLoader.frames())
-                print("skip a")
-                while key != yt_key and self.current_video_frame_index != yt_frameIndex:
-                    print("skip b")
-                    _, yt_key, _, yt_frameIndex, _ = next(self.youtubeLoader.frames())
-                self.youtubeLoader.blocking = True
+                people, frame_time = data
 
-            timestamp = np.round(frameTime)
-            avaAnn = None
+            timestamp = np.round(frame_time)
+            ava_annotation = None
 
             sameTimestamp = [v[1] for v in self.dataset[self.current_video_index][1] if v[0] == timestamp]
-            print("st")
             if len(sameTimestamp) == 1:
-                avaAnn = sameTimestamp[0]
-                print(avaAnn)
+                ava_annotation = sameTimestamp[0]
             else:
                 print("Found no ava ann")
 
             # Change increment video and frame
-            self.current_video_frame_index += 1
-            if len(self.dataset[self.current_video_index]) == self.current_video_frame_index:
+            if is_last:
                 self.current_video_frame_index = 0
                 self.current_video_index += 1
-                if len(self.dataset[self.current_video_index]) == self.current_video_index:
+                if len(self.dataset) == self.current_video_index:
                     self.current_video_index = 0
+            else:
+                self.current_video_frame_index += 1
 
-            return people, avaAnn
+            return people, is_last, ava_annotation
 
     def trainAutoEncoder(self, epochs=100, learningRate=0.005, dataset="Coco",
                          useLMDB=True, printUpdateEvery=40,
@@ -225,37 +213,60 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             tensorboard = True
 
         # Start the training process
-        total_iterations = len(self.dataset)
+        total_iterations = len(self.dataset)  # FIXME: this is wrong for ava
         visualize_counter = 0
         open_windows = set()
 
         # For predictive coding training
-        current_video = None
-        last_time = None
+        last_people = []
+        last_frame_time = 0.0
+        S_next = None
+
+        def tensorify(p):
+            S = torch.Tensor(len(p), 1, 56, 56)
+            for j in range(len(p)):
+                person = p[j]
+                aspect_adjusted = person.S.copy()
+                S[j][0] = torch.from_numpy(aspect_adjusted)
+
+            S = S.to(device).clone()
+            S[0 < S] = S[0 < S] / 15.0 * 0.8 + 0.2
+            return S
 
         print("Starting training")
         for epoch in range(epochs):
             epochLoss = np.float64(0)
             for i in range(total_iterations):
-                people, annotation = self._load(i)
-                if "predictive" in self.datasetName:
-                    # Load next
-                    nextS = 0
+                if self.datasetName in ActionClassifier.COCO_Datasets:
+                    people, annotation = self._load(i)
+                    S = tensorify(people)
+                elif self.datasetName in ActionClassifier.AVA_Datasets:
+                    people, is_last, annotation = self._load(i)
+                    if "predictive" in self.datasetName:
+                        # Track the next frame
+                        self.tracker.extract(people)  # TODO: allow passing in delta time
+                        if is_last:
+                            self.tracker = Tracker()
 
-                if len(people) == 0:
+                        # Only save the people who exist in all frames
+                        old_ids = list(map(lambda p: p.id, last_people))
+                        new_ids = list(map(lambda p: p.id, people))
+                        print(old_ids, " --> ", new_ids)
+
+                        old_people = list(filter(lambda p: p.id in new_ids, last_people.copy()))
+                        new_people = list(filter(lambda p: p.id in old_ids, people.copy()))
+
+                        S = tensorify(old_people)
+                        S_next = tensorify(new_people)
+                        # FIXME: Tracker is overriding last S, causing values below to be identical
+                        print(" ", torch.unique(S), "\n", torch.unique(S_next))
+
+                        last_people = people
+                    else:
+                        S = tensorify(people)
+
+                if S.shape[0] == 0:
                     continue
-
-                # Extract the S;es
-                S = torch.Tensor(len(people), 1, 56, 56)
-                for j in range(len(people)):
-                    person = people[j]
-                    aspect_adjusted = person.S.copy()
-                    S[j][0] = torch.from_numpy(aspect_adjusted)
-
-                S = S.to(device).clone()
-
-                # Normalize
-                S[0 < S] = S[0 < S] / 15.0 * 0.8 + 0.2
 
                 # Run prediction
                 embedding = self._AE_model.encode(S)
@@ -263,7 +274,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Optimize
                 if "predictive" in self.datasetName:
-                    lossSize = self.loss_function(out, nextS)
+                    lossSize = self.loss_function(out, S_next)
                 else:
                     lossSize = self.loss_function(out, S)
 
@@ -291,6 +302,10 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                         emb = np.repeat(emb, repeats=10, axis=0)
                         emb = np.vstack((emb, np.zeros((56-5*10, 14), dtype=np.uint8)))
                         comparison = np.hstack((inpS, emb, outS))
+                        if S_next is not None:
+                            Sn = (S_next[index, 0].detach()*255).cpu().to(torch.uint8).numpy()
+                            Sn = np.hstack((np.zeros((56, 56+14)), Sn))
+                            comparison = np.vstack((comparison, Sn)).astype(np.uint8)
                         comparison = cv2.applyColorMap(comparison, cv2.COLORMAP_JET)
                         cv2.imshow("person "+str(index), comparison)
                         new_open_windows.add("person "+str(index))
