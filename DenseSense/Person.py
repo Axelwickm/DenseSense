@@ -19,6 +19,7 @@ class Person(object):
 
         self.bounds = np.array([])  # x1, y1, x2, y2 bounds
         self.S = None      # Coarse segmentation
+        self.S_last = None
         self.I = None      # Activation for each body part
         self.U = None      # U mapping for each body part
         self.V = None      # V mapping for each body part
@@ -27,6 +28,7 @@ class Person(object):
 
     def become(self, otherInstance):
         self.incremental = otherInstance.incremental
+        self.S_last = self.S
         self.S = otherInstance.S
         self.I = otherInstance.I
         self.U = otherInstance.U

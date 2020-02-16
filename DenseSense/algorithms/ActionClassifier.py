@@ -49,7 +49,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
         self._AE_model = AutoEncoder()
         self._training = False
 
-    def loadModel(self, modelPath):
+    def loadModel(self, modelPath):  # TODO: load multiple models, refactor name
         self._modelPath = modelPath
         print("Loading ActionClassifier file from: " + self._modelPath)
         self._AE_model.load_state_dict(torch.load(self._modelPath, map_location=device))
@@ -194,7 +194,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             else:
                 self.current_video_frame_index += 1
 
-            return people, is_last, ava_annotation
+            return people, frame_time, is_last, ava_annotation
 
     def trainAutoEncoder(self, epochs=100, learningRate=0.005, dataset="Coco",
                          useLMDB=True, printUpdateEvery=40,
@@ -219,15 +219,16 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
         # For predictive coding training
         last_people = []
-        last_frame_time = 0.0
         S_next = None
 
-        def tensorify(p):
+        def tensorify(p, last=False):
             S = torch.Tensor(len(p), 1, 56, 56)
             for j in range(len(p)):
                 person = p[j]
-                aspect_adjusted = person.S.copy()
-                S[j][0] = torch.from_numpy(aspect_adjusted)
+                if last:
+                    S[j][0] = torch.from_numpy(person.S_last.copy())
+                else:
+                    S[j][0] = torch.from_numpy(person.S.copy())
 
             S = S.to(device).clone()
             S[0 < S] = S[0 < S] / 15.0 * 0.8 + 0.2
@@ -241,25 +242,23 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                     people, annotation = self._load(i)
                     S = tensorify(people)
                 elif self.datasetName in ActionClassifier.AVA_Datasets:
-                    people, is_last, annotation = self._load(i)
+                    people, frame_time, is_last, annotation = self._load(i)
                     if "predictive" in self.datasetName:
                         # Track the next frame
-                        self.tracker.extract(people)  # TODO: allow passing in delta time
-                        if is_last:
+                        self.tracker.extract(people, time_now=frame_time)
+                        if is_last:  # If new video next
                             self.tracker = Tracker()
 
                         # Only save the people who exist in all frames
                         old_ids = list(map(lambda p: p.id, last_people))
                         new_ids = list(map(lambda p: p.id, people))
-                        print(old_ids, " --> ", new_ids)
 
                         old_people = list(filter(lambda p: p.id in new_ids, last_people.copy()))
                         new_people = list(filter(lambda p: p.id in old_ids, people.copy()))
 
-                        S = tensorify(old_people)
-                        S_next = tensorify(new_people)
-                        # FIXME: Tracker is overriding last S, causing values below to be identical
-                        print(" ", torch.unique(S), "\n", torch.unique(S_next))
+                        # Filter old Ss
+                        S = tensorify(old_people, True)
+                        S_next = tensorify(new_people, False)
 
                         last_people = people
                     else:
@@ -293,7 +292,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                 if visualize != 0 and visualize <= visualize_counter:
                     visualize_counter = 0
                     new_open_windows = set()
-                    for index, person in enumerate(people):
+                    for index, _ in enumerate(S):
                         inpS = (S[index, 0].detach()*255).cpu().to(torch.uint8).numpy()
                         outS = (out[index, 0].detach()*255).cpu().to(torch.uint8).numpy()
                         emb = ((embedding[index].detach().cpu().numpy()*0.5+1.0)*255).astype(np.uint8)
@@ -309,7 +308,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                         comparison = cv2.applyColorMap(comparison, cv2.COLORMAP_JET)
                         cv2.imshow("person "+str(index), comparison)
                         new_open_windows.add("person "+str(index))
-                        break  # Only show one person
+                        #break  # Only show one person
 
                     for window in open_windows.difference(new_open_windows):
                         cv2.destroyWindow(window)
@@ -358,7 +357,7 @@ class AutoEncoder(nn.Module):
         )
 
         self.decoder = nn.Sequential(
-            nn.Linear(5, 100),
+            nn.Linear(6, 100),
             nn.ReLU(True),
             nn.Linear(100, 784),
             nn.ReLU(True),
@@ -373,7 +372,12 @@ class AutoEncoder(nn.Module):
         return self.encoder(S)
 
     def decode(self, x, delta_time=0):
-        # TODO: concat delta time
+        # Normalize and concatenate the delta time to every vector in tensor
+        delta_time = delta_time/(np.power(delta_time, 0.8)+0.3)
+        delta_time = torch.Tensor([delta_time])
+        delta_times = torch.cat(x.shape[0]*[delta_time]).reshape((x.shape[0], -1))
+        x = torch.cat([x, delta_times], 1)
+        # Do decoding
         return self.decoder(x)
 
 
