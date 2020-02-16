@@ -8,32 +8,36 @@ import numpy as np
 
 
 class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
-    def __init__(self, distThreshold=500, delete=0.3, hide=0.5,
-                 minFrames=3, maxPersistanceBufferSize=15, bboxLag = 0.4):
+    def __init__(self, dist_threshold=500, delete=0.3, hide=0.5,
+                 min_frames=3, max_persistance_buffer_size=15, bbox_lag=0.4):
         super().__init__()
         self.frame = 0
-        self.lastFrameTime = time.time()
+        self.last_frame_time = None
 
-        self.distThreshold = distThreshold
+        self.dist_threshold = dist_threshold
         self.delete = delete
         self.hide = hide
-        self.minFrames = minFrames
-        self.maxPersistanceBufferSize = maxPersistanceBufferSize
-        self.bboxLag = bboxLag
+        self.min_frames = min_frames
+        self.max_persistence_buffer_size = max_persistance_buffer_size
+        self.bboxLag = bbox_lag
 
-        self.oldPeople = []
+        self.old_people = []
 
-        self.ghostBounds = []
-        self.keptAliveIndex = []
+        self.ghost_bounds = []
+        self.kept_alive_index = []
         self.predictions = []
 
-    def extract(self, people, debug=False):
+    def extract(self, people, time_now=None, debug=False):
         # Modifies the people list, making each person's id persistent,
         # and might add/remove entries from people for continuity's sake.
         self.frame += 1
-        nowTime = time.time()
-        deltaTime = self.lastFrameTime - nowTime
-        self.lastFrameTime = nowTime
+        if time_now is None:
+            time_now = time.time()
+        if self.last_frame_time is None:
+            delta_time = 0
+        else:
+            delta_time = self.last_frame_time - time_now
+        self.last_frame_time = time_now
 
         # Make sure every person's original index is remembered
         for i in range(len(people)):
@@ -41,7 +45,7 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
 
         # Find optimal tracker <-> person configuration
         status = [-1 for _ in range(len(people))]  # xrange in python2
-        associations = [(-1, 10000) for _ in range(len(self.oldPeople))]
+        associations = [(-1, 10000) for _ in range(len(self.old_people))]
 
         # Loop to link the new people vector to the old one
         i = 0
@@ -61,8 +65,8 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
                     continue
             i += 1
 
-        self._updateExistingPeople(people, status, deltaTime)
-        self._changeStates(people, associations)
+        self._update_existing_people(people, status, delta_time)
+        self._change_states(people, associations)
 
     def _match(self, person, associations):
         # Convert to center and dim coords
@@ -71,30 +75,30 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
         center = np.array([bounds[0] + dims[0] / 2, bounds[1] + dims[1] / 2])
 
         # Find the closest viable tracked object
-        displacedPerson = None
+        displaced_person = None
         closest = float("inf")
-        cInd = -1
-        for i in range(len(self.oldPeople)):  # Should be xrange in python2
+        c_ind = -1
+        for i in range(len(self.old_people)):  # Should be xrange in python2
             # Get distance between this person and the predicted center of the person
-            predictedCenter = np.squeeze(self.oldPeople[i].attrs["track"]["kalmanPrediciton"][:2])
-            dist = np.linalg.norm(predictedCenter - center)
+            predicted_center = np.squeeze(self.old_people[i].attrs["track"]["kalmanPrediciton"][:2])
+            dist = np.linalg.norm(predicted_center - center)
             if dist < closest:
                 # Is this the closest not reserved?
                 if associations[i][0] == -1 or dist < associations[i][1]:
                     if associations[i][0] != -1:
-                        displacedPerson = associations[i][0]
+                        displaced_person = associations[i][0]
                     else:
-                        displacedPerson = None
+                        displaced_person = None
                     closest = dist
-                    cInd = i
+                    c_ind = i
 
         # If this was not close enough to be this object
-        if self.distThreshold < closest:
+        if self.dist_threshold < closest:
             return None, None, None
 
-        return cInd, closest, displacedPerson
+        return c_ind, closest, displaced_person
 
-    def _updateExistingPeople(self, people, status, deltaTime):
+    def _update_existing_people(self, people, status, delta_time):
         for i in range(len(people)):
             person = people[i]
             bounds = person.bounds
@@ -129,20 +133,20 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
 
                 person.attrs["track"] = {
                     "lastSeenFrame": self.frame,
-                    "lastSeenTime": self.lastFrameTime,
+                    "lastSeenTime": self.last_frame_time,
                     "history": deque([1]),
                     "isVisible": False,
                     "kalman": kalman,
                     "kalmanPrediciton": kalman.statePre
                 }
-                self.oldPeople.append(person)
+                self.old_people.append(person)
 
             else:  # Else, update this persons attributes
                 ind = status[i]
-                old_bounds = self.oldPeople[ind].bounds
-                person = self.oldPeople[ind].become(person)
+                old_bounds = self.old_people[ind].bounds
+                person = self.old_people[ind].become(person)
                 people[i] = person
-                self.oldPeople[ind] = person
+                self.old_people[ind] = person
 
                 # Temporal bounds smoothing
                 new_bounds = person.bounds
@@ -156,19 +160,19 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
 
                 # Update tracking attributes
                 person.attrs["track"]["lastSeenFrame"] = self.frame
-                person.attrs["track"]["lastSeenTime"] = self.lastFrameTime
+                person.attrs["track"]["lastSeenTime"] = self.last_frame_time
                 person.attrs["track"]["history"].append(1)
-                person.attrs["track"]["kalman"].transitionMatrix[0, 2] = deltaTime * 0.4
-                person.attrs["track"]["kalman"].transitionMatrix[1, 3] = deltaTime * 0.4
+                person.attrs["track"]["kalman"].transitionMatrix[0, 2] = delta_time * 0.4
+                person.attrs["track"]["kalman"].transitionMatrix[1, 3] = delta_time * 0.4
                 person.attrs["track"]["kalman"].correct(np.array(np.concatenate([center, dims]), dtype=np.float32))
                 person.attrs["track"]["kalmanPrediction"] = person.attrs["track"]["kalman"].predict()
 
-    def _changeStates(self, people, associations):
-        toRemove = []
+    def _change_states(self, people, associations):
+        to_remove = []
         i = 0
         # Dynamically for every person
-        while i < len(self.oldPeople):
-            track = self.oldPeople[i].attrs["track"]
+        while i < len(self.old_people):
+            track = self.old_people[i].attrs["track"]
 
             # Add to history for all people who didn't show up this frame
             if i < len(associations):
@@ -176,34 +180,34 @@ class Tracker(DenseSense.algorithms.Algorithm.Algorithm):
                     track["history"].append(0)
 
             # Restrict size of history
-            if self.maxPersistanceBufferSize < len(track["history"]):
+            if self.max_persistence_buffer_size < len(track["history"]):
                 track["history"].popleft()
 
             # Calculate average persistance over it's history
             persistence = float(sum(track["history"])) / len(track["history"])
 
-            if self.hide < persistence and self.minFrames < len(track["history"]):
+            if self.hide < persistence and self.min_frames < len(track["history"]):
                 track["isVisible"] = True  # The person is seen, and should keep being visible
             else:
                 track["isVisible"] = False  # The person should not be seen
                 if track["lastSeenFrame"] == self.frame:  # Suppress if he/she is
-                    toRemove.append(self.oldPeople[i].attrs["originalIndex"])
+                    to_remove.append(self.old_people[i].attrs["originalIndex"])
 
             if persistence < self.delete:
-                del self.oldPeople[i]  # Deleting from tracked objects
+                del self.old_people[i]  # Deleting from tracked objects
                 continue
 
             # If shouldn't be removed and not seen, then hallucinate the person
             if track["lastSeenFrame"] != self.frame and track["isVisible"]:
-                people.append(self.oldPeople[i])
+                people.append(self.old_people[i])
 
             i += 1
 
-        for index in sorted(toRemove, reverse=True):
+        for index in sorted(to_remove, reverse=True):
             del people[index]
 
     def renderDebug(self, image, people):
-        for person in self.oldPeople:
+        for person in self.old_people:
             bnds = person.bounds.astype(np.uint32)
             if not person.attrs["track"]["isVisible"]:
                 # Draw dark rectangle to indicate this person is being suppressed
