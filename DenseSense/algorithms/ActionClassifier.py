@@ -133,7 +133,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
         self.optimizer = torch.optim.Adam(self._AE_model.parameters(), lr=learningRate)
         self.loss_function = torch.nn.BCELoss()
 
-    def _load(self, index):
+    def _load(self, index=None):  # Load next if index is None
         if self.datasetName in ActionClassifier.COCO_Datasets:
             people = None
             # Load image from disk and process
@@ -182,8 +182,6 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             sameTimestamp = [v[1] for v in self.dataset[self.current_video_index][1] if v[0] == timestamp]
             if len(sameTimestamp) == 1:
                 ava_annotation = sameTimestamp[0]
-            else:
-                print("Found no ava ann")
 
             # Change increment video and frame
             if is_last:
@@ -217,32 +215,99 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
         visualize_counter = 0
         open_windows = set()
 
-        # For predictive coding training
-        last_people = []
-        S_next = None
 
         def tensorify(p, last=False):
             S = torch.Tensor(len(p), 1, 56, 56)
             for j in range(len(p)):
                 person = p[j]
                 if last:
-                    S[j][0] = torch.from_numpy(person.S_last.copy())
+                    S[j][0] = torch.from_numpy(person.S_last)
                 else:
-                    S[j][0] = torch.from_numpy(person.S.copy())
+                    S[j][0] = torch.from_numpy(person.S)
 
-            S = S.to(device).clone()
+            S = S.to(device)
             S[0 < S] = S[0 < S] / 15.0 * 0.8 + 0.2
             return S
 
-        print("Starting training")
-        for epoch in range(epochs):
-            epochLoss = np.float64(0)
-            for i in range(total_iterations):
-                if self.datasetName in ActionClassifier.COCO_Datasets:
+        def get_debug_image(index, S, embedding, out, S_next=None): # TODO: move to render debug
+            inpS = (S[index, 0].detach() * 255).cpu().to(torch.uint8).numpy()
+            outS = (out[index, 0].detach() * 255).cpu().to(torch.uint8).numpy()
+            emb = ((embedding[index].detach().cpu().numpy() * 0.5 + 1.0) * 255).astype(np.uint8)
+            emb = np.expand_dims(emb, axis=0)
+            emb = np.repeat(emb, repeats=14, axis=0).T
+            emb = np.repeat(emb, repeats=10, axis=0)
+            emb = np.vstack((emb, np.zeros((56 - 5 * 10, 14), dtype=np.uint8)))
+            comparison = np.hstack((inpS, emb, outS))
+            if S_next is not None:
+                Sn = (S_next[index, 0].detach() * 255).cpu().to(torch.uint8).numpy()
+                Sn = np.hstack((np.zeros((56, 56 + 14)), Sn))
+                comparison = np.vstack((comparison, Sn)).astype(np.uint8)
+
+            return cv2.applyColorMap(comparison, cv2.COLORMAP_JET)
+
+        if self.datasetName in ActionClassifier.COCO_Datasets:
+            print("Starting COCO dataset training")
+            for epoch in range(epochs):
+                epochLoss = np.float64(0)
+                for i in range(total_iterations):
                     people, annotation = self._load(i)
                     S = tensorify(people)
-                elif self.datasetName in ActionClassifier.AVA_Datasets:
-                    people, frame_time, is_last, annotation = self._load(i)
+
+                    if S.shape[0] == 0:
+                        continue
+
+                    print("\tCOCO DEVICE SHAPE", S.get_device(), S.shape)
+
+                    # Run prediction
+                    embedding = self._AE_model.encode(S)
+                    out = self._AE_model.decode(embedding)
+
+                    # Optimize
+                    lossSize = self.loss_function(out, S)
+
+                    lossSize.backward()
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    lossSize = lossSize.cpu().item()
+
+                    # Give feedback of training process
+                    epochLoss += lossSize / total_iterations
+                    visualize_counter += 1
+                    if (i - 1) % printUpdateEvery == 0:
+                        print("Iteration {} / {}, epoch {} / {}".format(i, total_iterations, epoch, epochs))
+                        print("Loss size: {}\n".format(lossSize / printUpdateEvery))
+
+                    if visualize != 0 and visualize <= visualize_counter:
+                        visualize_counter = 0
+                        new_open_windows = set()
+                        for index, _ in enumerate(S):
+                            debug_image = get_debug_image(index, S, embedding, out)
+                            cv2.imshow("person " + str(index), debug_image)
+                            new_open_windows.add("person " + str(index))
+                            break  # Only show one person
+
+                        for window in open_windows.difference(new_open_windows):
+                            cv2.destroyWindow(window)
+                        open_windows = new_open_windows
+                        cv2.waitKey(1)
+
+                    if tensorboard:
+                        absI = i + epoch * total_iterations
+                        writer.add_scalar("Loss size", lossSize, absI)
+
+                print("Finished epoch {} / {}. Loss size:".format(epoch, epochs, epochLoss))
+                self.saveModel(self._modelPath)
+
+        elif self.datasetName in ActionClassifier.AVA_Datasets:
+            print("Starting AVA dataset training")
+            last_frame_time = None
+            last_people = []
+            S_next = None
+            for epoch in range(epochs):
+                epochLoss = np.float64(0)
+                for i in range(total_iterations):
+                    people, frame_time, is_last, annotation = self._load()  # Load next
+
                     if "predictive" in self.datasetName:
                         # Track the next frame
                         self.tracker.extract(people, time_now=frame_time)
@@ -264,63 +329,56 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                     else:
                         S = tensorify(people)
 
-                if S.shape[0] == 0:
-                    continue
+                    if S.shape[0] == 0:
+                        continue
 
-                # Run prediction
-                embedding = self._AE_model.encode(S)
-                out = self._AE_model.decode(embedding)
+                    delta_time = 0
+                    if last_frame_time is not None:
+                        delta_time = frame_time - last_frame_time
+                    last_frame_time = frame_time
 
-                # Optimize
-                if "predictive" in self.datasetName:
-                    lossSize = self.loss_function(out, S_next)
-                else:
-                    lossSize = self.loss_function(out, S)
+                    # Run prediction
+                    embedding = self._AE_model.encode(S)
+                    out = self._AE_model.decode(embedding, delta_time)
 
-                lossSize.backward()
-                self.optimizer.step()
-                self.optimizer.zero_grad()
-                lossSize = lossSize.cpu().item()
+                    # Optimize
+                    if "predictive" in self.datasetName:
+                        lossSize = self.loss_function(out, S_next)
+                    else:
+                        lossSize = self.loss_function(out, S)
 
-                # Give feedback of training process
-                epochLoss += lossSize / total_iterations
-                visualize_counter += 1
-                if (i - 1) % printUpdateEvery == 0:
-                    print("Iteration {} / {}, epoch {} / {}".format(i, total_iterations, epoch, epochs))
-                    print("Loss size: {}\n".format(lossSize / printUpdateEvery))
+                    lossSize.backward()
+                    self.optimizer.step()
+                    self.optimizer.zero_grad()
+                    lossSize = lossSize.cpu().item()
 
-                if visualize != 0 and visualize <= visualize_counter:
-                    visualize_counter = 0
-                    new_open_windows = set()
-                    for index, _ in enumerate(S):
-                        inpS = (S[index, 0].detach()*255).cpu().to(torch.uint8).numpy()
-                        outS = (out[index, 0].detach()*255).cpu().to(torch.uint8).numpy()
-                        emb = ((embedding[index].detach().cpu().numpy()*0.5+1.0)*255).astype(np.uint8)
-                        emb = np.expand_dims(emb, axis=0)
-                        emb = np.repeat(emb, repeats=14, axis=0).T
-                        emb = np.repeat(emb, repeats=10, axis=0)
-                        emb = np.vstack((emb, np.zeros((56-5*10, 14), dtype=np.uint8)))
-                        comparison = np.hstack((inpS, emb, outS))
-                        if S_next is not None:
-                            Sn = (S_next[index, 0].detach()*255).cpu().to(torch.uint8).numpy()
-                            Sn = np.hstack((np.zeros((56, 56+14)), Sn))
-                            comparison = np.vstack((comparison, Sn)).astype(np.uint8)
-                        comparison = cv2.applyColorMap(comparison, cv2.COLORMAP_JET)
-                        cv2.imshow("person "+str(index), comparison)
-                        new_open_windows.add("person "+str(index))
-                        #break  # Only show one person
+                    # Give feedback of training process
+                    epochLoss += lossSize / total_iterations
+                    visualize_counter += 1
+                    if (i - 1) % printUpdateEvery == 0:
+                        print("Iteration {} / {}, epoch {} / {}".format(i, total_iterations, epoch, epochs))
+                        print("Loss size: {}\n".format(lossSize / printUpdateEvery))
 
-                    for window in open_windows.difference(new_open_windows):
-                        cv2.destroyWindow(window)
-                    open_windows = new_open_windows
-                    cv2.waitKey(1)
+                    if visualize != 0 and visualize <= visualize_counter:
+                        visualize_counter = 0
+                        new_open_windows = set()
+                        for index, _ in enumerate(S):
+                            debug_image = get_debug_image(index, S, embedding, out, S_next)
+                            cv2.imshow("person " + str(index), debug_image)
+                            new_open_windows.add("person " + str(index))
+                            break  # Only show one person
 
-                if tensorboard:
-                    absI = i + epoch * total_iterations
-                    writer.add_scalar("Loss size", lossSize, absI)
+                        for window in open_windows.difference(new_open_windows):
+                            cv2.destroyWindow(window)
+                        open_windows = new_open_windows
+                        cv2.waitKey(1)
 
-            print("Finished epoch {} / {}. Loss size:".format(epoch, epochs, epochLoss))
-            self.saveModel(self._modelPath)
+                    if tensorboard:
+                        absI = i + epoch * total_iterations
+                        writer.add_scalar("Loss size", lossSize, absI)
+
+                print("Finished epoch {} / {}. Loss size:".format(epoch, epochs, epochLoss))
+                self.saveModel(self._modelPath)
 
 
 class Flatten(torch.nn.Module):
@@ -376,7 +434,8 @@ class AutoEncoder(nn.Module):
         delta_time = delta_time/(np.power(delta_time, 0.8)+0.3)
         delta_time = torch.Tensor([delta_time])
         delta_times = torch.cat(x.shape[0]*[delta_time]).reshape((x.shape[0], -1))
-        x = torch.cat([x, delta_times], 1)
+        x = torch.cat([x, delta_times], 1).to(device)
+
         # Do decoding
         return self.decoder(x)
 
