@@ -8,7 +8,7 @@ parser.add_argument("algorithm", help="Name of algorithm to train",
 parser.add_argument("-m", "--model", help="Model path", default="./models/", type=str)
 parser.add_argument("-o", "--override", help="If model should be overridden", default=0, type=int)
 parser.add_argument("-e", "--epochs", help="How many epochs to train", default=50, type=int)
-parser.add_argument("-lr", "--learningRate", help="How many epochs to train", default=0.05, type=float)
+parser.add_argument("-lr", "--learningRate", help="How many epochs to train", default=0.005, type=float)
 parser.add_argument("-p", "--print", help="How often per iteration to print update", default=40, type=int)
 parser.add_argument("-d", "--dataset", help="What dataset to train", type=str)
 parser.add_argument("-v", "--visualize", help="If training should be visualized with matplotlib", default=0, type=int)
