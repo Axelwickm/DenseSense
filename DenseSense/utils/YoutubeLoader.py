@@ -1,11 +1,9 @@
-from queue import Queue
-from threading import Thread, Event
+from multiprocessing import Process, Queue, Value
 import time
 
 import pafy
 import ffmpeg
 import numpy as np
-
 
 
 class YoutubeLoader:
@@ -16,64 +14,68 @@ class YoutubeLoader:
 
         self.chunk_buffer_max_size = chunk_buffer_size
         self.chunk_max_size = 128
+        self.current_buffer_size = Value("i", 0)
 
         self.goal_dimensions = np.array(dimensions)
 
-        self.current_buffer_size = 0
+        self.chunk_link = Queue()
         self.chunk_buffer = {}
 
+        self.new_queued_videos = Queue()
         self.video_queue = []
 
-        self.video_cursor = None
-        self.chunk_cursor = None
-        self.frame_cursor = None
+        self.video_cursor = Value("i", -1)
+        self.chunk_cursor = Value("i", -1)
+        self.frame_cursor = 0
 
-        self.downloader = Thread(target=self._download)
+        self.downloader = Process(target=self._download)
         self.downloader.start()
 
     def queue_video(self, key, start_time, end_time, fps_mean=5, fps_std=2):
         if self.verbose:
             print("Queueing video: {}, {}->{}".format(key, start_time, end_time))
         self.video_queue.append((key, start_time, end_time, fps_mean, fps_std))
-        self.chunk_buffer[key] = [[Event(), ()]]
+        self.new_queued_videos.put((key, start_time, end_time, fps_mean, fps_std))
 
     def get(self, video_index, frame_index):
-        self.video_cursor = video_index
-        self.chunk_cursor = int(np.floor(frame_index / self.chunk_max_size))
+        self._update_chunk_buffer()
+
+        self.video_cursor.value = video_index
+        self.chunk_cursor.value = int(np.floor(frame_index / self.chunk_max_size))
         self.frame_cursor = frame_index % self.chunk_max_size
 
         # Get data (wait for downloader if not already done)
-        key, start_time, end_time, _, _ = self.video_queue[self.video_cursor]
-        while self.chunk_cursor >= len(self.chunk_buffer[key]):
-            if self.verbose:
-                print("Waiting for download thread to start with video...")
-            time.sleep(0.1)
+        key, start_time, end_time, _, _ = self.video_queue[self.video_cursor.value]
+        while key not in self.chunk_buffer:
+            self._update_chunk_buffer()
 
-        self.chunk_buffer[key][self.chunk_cursor][0].wait()
-        frames, times, indices, is_last_chunk = self.chunk_buffer[key][self.chunk_cursor][1]
+        while self.chunk_cursor.value >= len(self.chunk_buffer[key]):
+            self._update_chunk_buffer()
 
-        # Format return output
-        if frames is None:
+        data = self.chunk_buffer[key][self.chunk_cursor.value]
+        if data == "unavailable":
             is_last_frame = True
             out = None, None, True
+            if self.verbose:
+                print("Could not find video {} ({}), chunk {}"
+                      .format(key, self.video_cursor.value, self.chunk_cursor.value))
         else:
+            frames, times, indices, is_last_chunk = data
             is_last_frame = is_last_chunk and self.frame_cursor == len(frames) - 1
             out = frames[self.frame_cursor], times[self.frame_cursor], is_last_frame
 
-        if self.verbose and False:
-            print("Yield video {} ({}), chunk {}, frame {}:, last frame {}"
-                  .format(key, self.video_cursor, self.chunk_cursor, self.frame_cursor, is_last_frame))
+            if self.verbose and False:
+                print("Yield video {} ({}), chunk {}, frame {}:, last frame {}"
+                      .format(key, self.video_cursor.value, self.chunk_cursor.value, self.frame_cursor, is_last_frame))
 
-        # Do increments (semi-redundant)
-        if frames is None:
-            pass
-        elif self.frame_cursor == len(frames) - 1:
-            self.frame_cursor += 1
+            # Do increments (semi-redundant)
+            if self.frame_cursor == len(frames) - 1:
+                self.frame_cursor += 1
 
         if is_last_frame:
-            self.video_cursor = (self.video_cursor+1) % len(self.video_queue)
+            self.video_cursor.value = (self.video_cursor.value+1) % len(self.video_queue)
+            self.chunk_cursor.value = 0
             self.frame_cursor = 0
-            self.chunk_cursor = 0
 
         return out
 
@@ -88,15 +90,37 @@ class YoutubeLoader:
                     break
                 yield out
 
+    def _update_chunk_buffer(self):
+        while not self.chunk_link.empty():
+            message = self.chunk_link.get()
+            key = message["key"]
+            if message["what"] == "add":
+                if key not in self.chunk_buffer:
+                    self.chunk_buffer[key] = []
+                self.chunk_buffer[key].append(message["data"])
+            if message["what"] == "release_chunk":
+                chunk = message["chunk"]
+                self.chunk_buffer[key][chunk] = None
+            if message["what"] == "release_video":
+                del self.chunk_buffer[key]
+
     def _download(self):
         currently_downloaded_videos = []
+        chunk_status = {}
 
         while True:
-            if len(self.video_queue) == 0 or self.video_cursor is None:
+            # Sync the new queue videos
+            while True:
+                if self.new_queued_videos.empty():
+                    break
+                new_video = self.new_queued_videos.get()
+                self.video_queue.append(new_video)
+
+            if len(self.video_queue) == 0 or self.video_cursor.value == -1:
                 continue
 
             # Find what video to download
-            download_video_cursor = self.video_cursor
+            download_video_cursor = self.video_cursor.value
             if len(currently_downloaded_videos) != 0:
                 while download_video_cursor in currently_downloaded_videos:
                     download_video_cursor = (download_video_cursor + 1) % len(self.video_queue)
@@ -108,13 +132,18 @@ class YoutubeLoader:
                 print("\tDownloading video {}, {}->{}".format(download_video_cursor, start_time, end_time))
 
             # Download video info
+            chunk_status[key] = [False]
             try:
                 video = pafy.new(key)
             except IOError as e:
                 if self.verbose:
                     print("\tVideo probably doesn't exists anymore (or you don't have internet)")
-                self.chunk_buffer[key] = [[Event(), (None, None, None, True)]]
-                self.chunk_buffer[key][0][0].set()
+                chunk_status[key] = "unavailable"
+                self.chunk_link.put({
+                    "what": "add",
+                    "key": key,
+                    "data": "unavailable"
+                })
                 continue
 
             stream = self._find_most_fitting_stream(video)
@@ -140,12 +169,11 @@ class YoutubeLoader:
 
                 if self.verbose:
                     print("\tDownloading video {} chunk {}: {}s -> {}s".format(download_video_cursor,
-                                                                               len(self.chunk_buffer[key])-1,
+                                                                               len(chunk_status[key])-1,
                                                                                chunk_start, chunk_end))
 
                 # Download chunk
-                video = ffmpeg.input(stream.url, ss=chunk_start, t=chunk_duration,
-                                     format="mp4", loglevel="error")
+                video = ffmpeg.input(stream.url, ss=chunk_start, t=chunk_duration, format="mp4", loglevel="error")
                 video = video.output('pipe:', format='rawvideo', pix_fmt='bgr24', loglevel="error")
                 out, err = video.run(capture_stdout=True)
                 downloaded_frames = np.frombuffer(out, np.uint8).reshape([-1, dimensions[1], dimensions[0], 3])
@@ -166,48 +194,70 @@ class YoutubeLoader:
 
                 # Pass on data
                 last_chunk = len(frame_times) == 0
-                self.chunk_buffer[key][-1][1] = filtered_frames, current_frames, frames_inds, last_chunk
-                self.chunk_buffer[key].append([Event(), ()])
-                self.chunk_buffer[key][-2][0].set()
-                self.current_buffer_size += 1
+                chunk_status[key][-1] = True
+                self.chunk_link.put({
+                    "what": "add",
+                    "key": key,
+                    "data": (filtered_frames, current_frames, frames_inds, last_chunk)
+                })
+
+                if not last_chunk:
+                    chunk_status[key].append(False)
+
+                self.current_buffer_size.value += 1
                 if self.verbose:
-                    print("\tWas last:", last_chunk)
-                    print("\tTotal chunks now buffered: "+str(self.current_buffer_size)
-                          + " (max "+str(self.chunk_buffer_max_size)+")")
+                    print("\tDownloaded. Was last: {}. "
+                          "Buffered chunks: {} (max {})".format(last_chunk,
+                                                                self.current_buffer_size.value,
+                                                                self.chunk_buffer_max_size))
 
                 while True:
                     def release_chunk(video_i, chunk_i):
                         k = self.video_queue[video_i][0]
-                        if self.chunk_buffer[k][chunk_i][0].isSet():
-                            self.current_buffer_size -= 1
-                        self.chunk_buffer[k][chunk_i][1] = None
+                        if chunk_status[k] == "unavailable":
+                            return False
+
+                        self.chunk_link.put({
+                            "what": "release_chunk",
+                            "key": k,
+                            "chunk": chunk_i
+                        })
+                        if chunk_status[k][chunk_i]:
+                            return True
+                        return False
 
                     def should_release(video_i):
-                        delta = video_i - self.video_cursor
+                        delta = video_i - self.video_cursor.value
                         if delta < 0:
                             delta += len(self.video_queue)
                         allowed = 0 <= delta <= self.chunk_buffer_max_size
                         return not allowed
 
                     # Release old chunks of current video
-                    playing_key = self.video_queue[self.video_cursor][0]
-                    for i in range(len(self.chunk_buffer[playing_key])):
-                        if i < self.chunk_cursor:
-                            release_chunk(self.video_cursor, i)
+                    playing_key = self.video_queue[self.video_cursor.value][0]
+                    for i in range(len(chunk_status[playing_key])):
+                        if i < self.chunk_cursor.value:
+                            self.current_buffer_size.value -= release_chunk(self.video_cursor.value, i)
 
                     # Release old videos
                     release_videos = list(filter(should_release, currently_downloaded_videos))
 
                     for rv in release_videos:
-                        if self.verbose:
+                        if self.verbose:  # FIXME: handle unavail
                             print("\tRelease video: " + str(rv))
                         currently_downloaded_videos.remove(rv)
                         current_key = self.video_queue[rv][0]
-                        for i, rc in enumerate(self.chunk_buffer[current_key]):
-                            release_chunk(rv, i)
-                        self.chunk_buffer[current_key] = [[Event(), ()]]
+                        if chunk_status[current_key] != "unavailable":
+                            for i, rc in enumerate(chunk_status[current_key]):
+                                self.current_buffer_size.value -= release_chunk(rv, i)
+                        del chunk_status[current_key]
 
-                    if self.chunk_buffer_max_size <= self.current_buffer_size:
+                        self.chunk_link.put({
+                            "what": "release_video",
+                            "key": current_key,
+                        })
+
+                    if self.chunk_buffer_max_size <= self.current_buffer_size.value:
                         if self.verbose:
                             print("\tWaiting to download next chunk")
                         time.sleep(0.1)
@@ -234,11 +284,11 @@ class YoutubeLoader:
 if __name__ == "__main__":
     import cv2
 
-    yl = YoutubeLoader(chunk_buffer_size=6, verbose=False)
+    yl = YoutubeLoader(chunk_buffer_size=6, verbose=True)
     yl.queue_video("dVPqWh39HJ0", 0, 10)
     yl.queue_video("IzIBpFDRr5g", 20, 30)
     yl.queue_video("DSYXObynLWY", 30, 70)
-    yl.queue_video("Idontexiste", 30, 70)
+    yl.queue_video("Idontexist-", 30, 70)
     yl.queue_video("UnETVMI4tY8", 0, 10)
     yl.queue_video("3DBQxxvuWYA", 10, 11)
     yl.queue_video("ERg3JvmnkUI", 0.02, 30)
@@ -246,7 +296,7 @@ if __name__ == "__main__":
     yl.queue_video("hzd53i7hhhA", 0, 70)
     yl.queue_video("bpm-YTucLrA", 5, 20)
     yl.queue_video("vc8MddDFRw4", 0, 20)
-    yl.queue_video("iKygSW4Xpjc", 1, 19*60)
+    yl.queue_video("7Z2XRg3dy9k", 1, 19*60)
     yl.queue_video("-wPTadJB5As", 5, 20)
 
     while True:
