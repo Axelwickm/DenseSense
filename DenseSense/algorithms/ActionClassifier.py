@@ -72,7 +72,6 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
         self.sanitizer = Sanitizer()
         self.sanitizer.loadModel(topDir + "/models/Sanitizer.pth")
 
-
         if datasetName in ActionClassifier.COCO_Datasets:
             print("Loading COCO dataset: "+datasetName)
             from pycocotools.coco import COCO
@@ -155,6 +154,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
         elif self.datasetName in ActionClassifier.AVA_Datasets:
             data = None
+            image = None
             people, frame_time, is_last = None, None, False
             key = self.dataset[self.current_video_index][0]
 
@@ -165,16 +165,19 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             if data is None:
                 image, frame_time, is_last = self.youtubeLoader.get(self.current_video_index,
                                                                     self.current_video_frame_index)
-
-                people = self.denseposeExtractor.extract(image)
-                people = self.sanitizer.extract(people)
+                if image is None:
+                    people = []
+                    frame_time = 0
+                else:
+                    people = self.denseposeExtractor.extract(image)
+                    people = self.sanitizer.extract(people)
 
                 if self.useLMDB:  # Save processed data
                     self.lmdb.save("DensePoseWrapper_Sanitized_AVA",
-                                   str(key) + "_" + str(self.current_video_frame_index), (people, frame_time))
+                                   str(key) + "_" + str(self.current_video_frame_index), (people, frame_time, is_last))
 
             else:
-                people, frame_time = data
+                people, frame_time, is_last = data
 
             timestamp = np.round(frame_time)
             ava_annotation = None
@@ -182,6 +185,19 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             sameTimestamp = [v[1] for v in self.dataset[self.current_video_index][1] if v[0] == timestamp]
             if len(sameTimestamp) == 1:
                 ava_annotation = sameTimestamp[0]
+
+            # To show the whole dataset as it's being downloaded
+            if image is not None and True:
+                if ava_annotation is not None:
+                    for k, p in ava_annotation.items():
+                        bbox = np.array([float(p["bbox"][0]), float(p["bbox"][1]),
+                                         float(p["bbox"][2]), float(p["bbox"][3])])
+                        p1 = bbox[:2] * np.array([image.shape[1], image.shape[0]], dtype=np.float)
+                        p2 = bbox[2:] * np.array([image.shape[1], image.shape[0]], dtype=np.float)
+                        image = cv2.rectangle(image, tuple(p1.astype(np.int32)), tuple(p2.astype(np.int32)),
+                                              (20, 20, 200), 1)
+                cv2.imshow("frame", image)
+                cv2.waitKey(1)
 
             # Change increment video and frame
             if is_last:
@@ -211,10 +227,9 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             tensorboard = True
 
         # Start the training process
-        total_iterations = len(self.dataset)  # FIXME: this is wrong for ava
+        total_iterations = len(self.dataset)
         visualize_counter = 0
         open_windows = set()
-
 
         def tensorify(p, last=False):
             S = torch.Tensor(len(p), 1, 56, 56)
@@ -255,8 +270,6 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
                     if S.shape[0] == 0:
                         continue
-
-                    print("\tCOCO DEVICE SHAPE", S.get_device(), S.shape)
 
                     # Run prediction
                     embedding = self._AE_model.encode(S)
@@ -299,6 +312,18 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                 self.saveModel(self._modelPath)
 
         elif self.datasetName in ActionClassifier.AVA_Datasets:
+            # Unfortunately, needs to run through the whole AVA dataset to determine the size in frames
+            print("Going through ava dataset once to determine the size")
+            total_iterations = 0
+            for video_i in range(len(self.dataset)):
+                is_last = False
+                while not is_last:
+                    people, frame_time, is_last, annotation = self._load()  # Load next
+                    total_iterations += 1
+                    if (total_iterations - 1) % printUpdateEvery == 0:
+                        print("Frame/iteration {} (video {} / {})".format(total_iterations, video_i, len(self.dataset)))
+            print("Total number of iterations are {}".format(total_iterations))
+
             print("Starting AVA dataset training")
             last_frame_time = None
             last_people = []
@@ -307,7 +332,6 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                 epochLoss = np.float64(0)
                 for i in range(total_iterations):
                     people, frame_time, is_last, annotation = self._load()  # Load next
-
                     if "predictive" in self.datasetName:
                         # Track the next frame
                         self.tracker.extract(people, time_now=frame_time)
@@ -356,7 +380,10 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                     epochLoss += lossSize / total_iterations
                     visualize_counter += 1
                     if (i - 1) % printUpdateEvery == 0:
-                        print("Iteration {} / {}, epoch {} / {}".format(i, total_iterations, epoch, epochs))
+                        print("Iteration {} / {} (video {}/{}), epoch {} / {}".format(i, total_iterations,
+                                                                                      self.current_video_index,
+                                                                                      len(self.dataset),
+                                                                                      epoch, epochs))
                         print("Loss size: {}\n".format(lossSize / printUpdateEvery))
 
                     if visualize != 0 and visualize <= visualize_counter:

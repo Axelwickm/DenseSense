@@ -61,6 +61,7 @@ class YoutubeLoader:
                       .format(key, self.video_cursor.value, self.chunk_cursor.value))
         else:
             frames, times, indices, is_last_chunk = data
+            self.frame_cursor = min(self.frame_cursor, len(frames)-1)
             is_last_frame = is_last_chunk and self.frame_cursor == len(frames) - 1
             out = frames[self.frame_cursor], times[self.frame_cursor], is_last_frame
 
@@ -214,17 +215,15 @@ class YoutubeLoader:
                 while True:
                     def release_chunk(video_i, chunk_i):
                         k = self.video_queue[video_i][0]
-                        if chunk_status[k] == "unavailable":
-                            return False
-
-                        self.chunk_link.put({
-                            "what": "release_chunk",
-                            "key": k,
-                            "chunk": chunk_i
-                        })
-                        if chunk_status[k][chunk_i]:
-                            return True
-                        return False
+                        if chunk_status[k] != "unavailable":
+                            if chunk_status[k][chunk_i]:
+                                chunk_status[k][chunk_i] = False
+                                self.current_buffer_size.value -= 1
+                                self.chunk_link.put({
+                                    "what": "release_chunk",
+                                    "key": k,
+                                    "chunk": chunk_i
+                                })
 
                     def should_release(video_i):
                         delta = video_i - self.video_cursor.value
@@ -237,19 +236,19 @@ class YoutubeLoader:
                     playing_key = self.video_queue[self.video_cursor.value][0]
                     for i in range(len(chunk_status[playing_key])):
                         if i < self.chunk_cursor.value:
-                            self.current_buffer_size.value -= release_chunk(self.video_cursor.value, i)
+                            release_chunk(self.video_cursor.value, i)
 
                     # Release old videos
                     release_videos = list(filter(should_release, currently_downloaded_videos))
 
                     for rv in release_videos:
-                        if self.verbose:  # FIXME: handle unavail
+                        current_key = self.video_queue[rv][0]
+                        if self.verbose:
                             print("\tRelease video: " + str(rv))
                         currently_downloaded_videos.remove(rv)
-                        current_key = self.video_queue[rv][0]
                         if chunk_status[current_key] != "unavailable":
                             for i, rc in enumerate(chunk_status[current_key]):
-                                self.current_buffer_size.value -= release_chunk(rv, i)
+                                release_chunk(rv, i)
                         del chunk_status[current_key]
 
                         self.chunk_link.put({
@@ -257,6 +256,7 @@ class YoutubeLoader:
                             "key": current_key,
                         })
 
+                    # Wait as to not download to much to RAM
                     if self.chunk_buffer_max_size <= self.current_buffer_size.value:
                         if self.verbose:
                             print("\tWaiting to download next chunk")
