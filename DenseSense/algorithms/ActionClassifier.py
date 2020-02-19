@@ -126,7 +126,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
         self.useLMDB = useLMDB
         if useLMDB:
-            self.lmdb = LMDBHelper("a")
+            self.lmdb = LMDBHelper("a", max_size=1028*1028*1028*32)
             self.lmdb.verbose = False
 
         self.optimizer = torch.optim.Adam(self._AE_model.parameters(), lr=learningRate)
@@ -320,23 +320,30 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                 while not is_last:
                     people, frame_time, is_last, annotation = self._load()  # Load next
                     total_iterations += 1
-                    if (total_iterations - 1) % printUpdateEvery == 0:
+                    if (total_iterations - 1) % 500 == 0:
                         print("Frame/iteration {} (video {} / {})".format(total_iterations, video_i, len(self.dataset)))
+                if 20 <= video_i:
+                    break
             print("Total number of iterations are {}".format(total_iterations))
 
             print("Starting AVA dataset training")
             last_frame_time = None
             last_people = []
             S_next = None
+            current_video = 0
+            was_last = False
             for epoch in range(epochs):
                 epochLoss = np.float64(0)
                 for i in range(total_iterations):
                     people, frame_time, is_last, annotation = self._load()  # Load next
+                    current_video += is_last
+
                     if "predictive" in self.datasetName:
                         # Track the next frame
                         self.tracker.extract(people, time_now=frame_time)
                         if is_last:  # If new video next
                             self.tracker = Tracker()
+                            last_frame_time = None
 
                         # Only save the people who exist in all frames
                         old_ids = list(map(lambda p: p.id, last_people))
@@ -351,19 +358,20 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
                         last_people = people
                     else:
+                        frame_time = last_frame_time
                         S = tensorify(people)
 
                     if S.shape[0] == 0:
                         continue
 
                     delta_time = 0
-                    if last_frame_time is not None:
+                    if last_frame_time is not None and was_last is False:
                         delta_time = frame_time - last_frame_time
                     last_frame_time = frame_time
 
                     # Run prediction
-                    embedding = self._AE_model.encode(S)
-                    out = self._AE_model.decode(embedding, delta_time)
+                    embedding = self._AE_model.encode(S, delta_time)
+                    out = self._AE_model.decode(embedding)
 
                     # Optimize
                     if "predictive" in self.datasetName:
@@ -379,9 +387,10 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                     # Give feedback of training process
                     epochLoss += lossSize / total_iterations
                     visualize_counter += 1
+                    was_last = is_last
                     if (i - 1) % printUpdateEvery == 0:
                         print("Iteration {} / {} (video {}/{}), epoch {} / {}".format(i, total_iterations,
-                                                                                      self.current_video_index,
+                                                                                      current_video,
                                                                                       len(self.dataset),
                                                                                       epoch, epochs))
                         print("Loss size: {}\n".format(lossSize / printUpdateEvery))
@@ -428,21 +437,24 @@ class Make2D(torch.nn.Module):
 class AutoEncoder(nn.Module):
     def __init__(self):
         super(AutoEncoder, self).__init__()
-        self.encoder = nn.Sequential(
+        self.encoder_first = nn.Sequential(
             nn.Conv2d(1, 16, 3, padding=1),
             nn.ReLU(True),
             nn.MaxPool2d(2, 2),
             nn.Conv2d(16, 4, 3, padding=1),
             nn.ReLU(False),
             nn.MaxPool2d(2, 2),
-            Flatten(),
-            nn.Linear(784, 100),
+            Flatten()
+        )
+
+        self.encoder_second = nn.Sequential(
+            nn.Linear(784+1, 100),  # +1 is delta time
             nn.ReLU(True),
             nn.Linear(100, 5)
         )
 
         self.decoder = nn.Sequential(
-            nn.Linear(6, 100),
+            nn.Linear(5, 100),
             nn.ReLU(True),
             nn.Linear(100, 784),
             nn.ReLU(True),
@@ -453,16 +465,21 @@ class AutoEncoder(nn.Module):
             nn.Sigmoid()
         )
 
-    def encode(self, S):
-        return self.encoder(S)
-
-    def decode(self, x, delta_time=0):
+    def encode(self, S, delta_time=None):
+        if delta_time is None:
+            delta_time = np.random.rand()*0.5
         # Normalize and concatenate the delta time to every vector in tensor
-        delta_time = delta_time/(np.power(delta_time, 0.8)+0.3)
+        delta_time = min(max(0, delta_time), 10)
+        delta_time = delta_time / (np.power(delta_time, 0.8) + 0.3)
         delta_time = torch.Tensor([delta_time])
-        delta_times = torch.cat(x.shape[0]*[delta_time]).reshape((x.shape[0], -1))
+        delta_times = torch.cat(S.shape[0] * [delta_time]).reshape((S.shape[0], -1))
+        # Run model
+        x = self.encoder_first(S)
         x = torch.cat([x, delta_times], 1).to(device)
+        x = self.encoder_second(x)
+        return x
 
+    def decode(self, x):
         # Do decoding
         return self.decoder(x)
 
