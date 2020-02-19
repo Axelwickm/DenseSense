@@ -6,7 +6,7 @@ from DenseSense.utils.ThingSerializer import ThingSerializer
 class LMDBHelper:
 
     # Mode: r=readonly, a=append, o=override
-    def __init__(self, mode="r", path="./data/", verbose=True, prefix="LMDB_"):
+    def __init__(self, mode="r", path="./data/", verbose=True, prefix="LMDB_", max_size=1028*1028*1028*10):
         self.verbose = verbose
         if self.verbose:
             print("Initiating LMDB_helper:\n\tmode = {}\n\tpath = {}\n".format(mode, path))
@@ -14,11 +14,12 @@ class LMDBHelper:
         self.mode = mode
         self.databases = {}
         self.prefix = prefix
+        self.max_size = max_size
 
     def get(self, db_name, key):  # TODO: None-key to get whole database at once
         TN = self.prefix + db_name  # Filename
         if TN not in self.databases:      # Check if already opened
-            self.openDatabase(TN)
+            self.open_database(TN)
 
         key = str(key).encode('ascii')
         with self.databases[TN].begin(buffers=True) as t:
@@ -38,7 +39,7 @@ class LMDBHelper:
             "LMDB_helper in readonly mode"
         TN = self.prefix + db_name  # Filename
         if TN not in self.databases:      # Check if already opened
-            self.openDatabase(TN)
+            self.open_database(TN)
 
         key = str(key).encode('ascii')
 
@@ -57,7 +58,7 @@ class LMDBHelper:
 
         return True
 
-    def openDatabase(self, name, maxSize=1028*1028*1028*10):  # Default max size is 10 GB
+    def open_database(self, name):
         if self.verbose:
             print("Opening LMDB database {} in mode {}".format(name, self.mode))
         path = os.path.join(self.path, name)
@@ -68,5 +69,5 @@ class LMDBHelper:
 
         elif self.mode in ["o", "override", "a", "append"]:
             db = lmdb.open(path, readonly=False, create=True)
-            db.set_mapsize(maxSize)
+            db.set_mapsize(self.max_size)
             self.databases[name] = db
