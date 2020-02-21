@@ -50,6 +50,8 @@ class YoutubeLoader:
             self._update_chunk_buffer()
 
         while self.chunk_cursor.value >= len(self.chunk_buffer[key]):
+            if self.chunk_buffer[key][-1] == "last":
+                return None, None, True
             self._update_chunk_buffer()
 
         data = self.chunk_buffer[key][self.chunk_cursor.value]
@@ -101,7 +103,10 @@ class YoutubeLoader:
                 self.chunk_buffer[key].append(message["data"])
             if message["what"] == "release_chunk":
                 chunk = message["chunk"]
-                self.chunk_buffer[key][chunk] = None
+                if self.chunk_buffer[key][chunk][3]:
+                    self.chunk_buffer[key][chunk] = "last"
+                else:
+                    self.chunk_buffer[key][chunk] = None
             if message["what"] == "release_video":
                 del self.chunk_buffer[key]
 
