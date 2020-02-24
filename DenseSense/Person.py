@@ -25,6 +25,7 @@ class Person(object):
         self.V = None      # V mapping for each body part
 
         self.A = None      # Alpha channel or mask to be applied to data
+        self.pose_vector = None
 
     def become(self, otherInstance):
         self.incremental = otherInstance.incremental

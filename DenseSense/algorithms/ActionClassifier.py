@@ -1,6 +1,4 @@
-import json
 import os
-from copy import copy
 
 import cv2
 
@@ -22,6 +20,20 @@ device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 if torch.cuda.is_available():
     torch.set_default_tensor_type(torch.cuda.FloatTensor)
 print("ActionClassifier running on: " + str(device))
+
+
+def _tensorify_people(p, last=False):
+    S = torch.Tensor(len(p), 1, 56, 56)
+    for j in range(len(p)):
+        person = p[j]
+        if last:
+            S[j][0] = torch.from_numpy(person.S_last)
+        else:
+            S[j][0] = torch.from_numpy(person.S)
+
+    S = S.to(device)
+    S[0 < S] = S[0 < S] / 15.0 * 0.8 + 0.2
+    return S
 
 
 class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
@@ -61,6 +73,17 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
         self._modelPath = modelPath
         print("Saving ActionClassifier model to: "+self._modelPath)
         torch.save(self._AE_model.state_dict(), self._modelPath)
+
+    def extract_ae(self, people, delta_time=None):
+        S = _tensorify_people(people)
+
+        if S.shape[0] == 0:
+            return
+
+        # Run prediction
+        embeddings = self._AE_model.encode(S, delta_time)
+        for i, embedding in enumerate(embeddings):
+            people[i].pose_vector = embedding.detach().cpu().numpy()
 
     def _initTraining(self, learningRate, datasetName, useLMDB):
         self.datasetName = datasetName
@@ -113,7 +136,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
             self.dataset = ordered_data
 
-            self.youtubeLoader = YoutubeLoader(verbose=False)
+            self.youtubeLoader = YoutubeLoader(verbose=True)
             for key, video in self.dataset:
                 self.youtubeLoader.queue_video(key, video[0][0], video[-1][0])
 
@@ -143,7 +166,6 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             if people is None:
                 image = cv2.imread(self.cocoPath + "/" + cocoImage["file_name"])
                 if image is None:
-                    print(cocoImage)
                     raise Exception("Could not find image: "+str(index))
 
                 people = self.denseposeExtractor.extract(image)
@@ -231,42 +253,13 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
         visualize_counter = 0
         open_windows = set()
 
-        def tensorify(p, last=False):
-            S = torch.Tensor(len(p), 1, 56, 56)
-            for j in range(len(p)):
-                person = p[j]
-                if last:
-                    S[j][0] = torch.from_numpy(person.S_last)
-                else:
-                    S[j][0] = torch.from_numpy(person.S)
-
-            S = S.to(device)
-            S[0 < S] = S[0 < S] / 15.0 * 0.8 + 0.2
-            return S
-
-        def get_debug_image(index, S, embedding, out, S_next=None): # TODO: move to render debug
-            inpS = (S[index, 0].detach() * 255).cpu().to(torch.uint8).numpy()
-            outS = (out[index, 0].detach() * 255).cpu().to(torch.uint8).numpy()
-            emb = ((embedding[index].detach().cpu().numpy() * 0.5 + 1.0) * 255).astype(np.uint8)
-            emb = np.expand_dims(emb, axis=0)
-            emb = np.repeat(emb, repeats=14, axis=0).T
-            emb = np.repeat(emb, repeats=10, axis=0)
-            emb = np.vstack((emb, np.zeros((56 - 5 * 10, 14), dtype=np.uint8)))
-            comparison = np.hstack((inpS, emb, outS))
-            if S_next is not None:
-                Sn = (S_next[index, 0].detach() * 255).cpu().to(torch.uint8).numpy()
-                Sn = np.hstack((np.zeros((56, 56 + 14)), Sn))
-                comparison = np.vstack((comparison, Sn)).astype(np.uint8)
-
-            return cv2.applyColorMap(comparison, cv2.COLORMAP_JET)
-
         if self.datasetName in ActionClassifier.COCO_Datasets:
             print("Starting COCO dataset training")
             for epoch in range(epochs):
                 epochLoss = np.float64(0)
                 for i in range(total_iterations):
                     people, annotation = self._load(i)
-                    S = tensorify(people)
+                    S = _tensorify_people(people)
 
                     if S.shape[0] == 0:
                         continue
@@ -294,7 +287,10 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                         visualize_counter = 0
                         new_open_windows = set()
                         for index, _ in enumerate(S):
-                            debug_image = get_debug_image(index, S, embedding, out)
+                            inpS = (S[index, 0].detach()).cpu().to(torch.float).numpy()
+                            outS = (out[index, 0].detach()).cpu().to(torch.float32).numpy()
+                            emb = embedding.detach().cpu().numpy()
+                            debug_image = self._get_ae_from_embedding(index, inpS, emb, outS, None)
                             cv2.imshow("person " + str(index), debug_image)
                             new_open_windows.add("person " + str(index))
                             break  # Only show one person
@@ -322,8 +318,6 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                     total_iterations += 1
                     if (total_iterations - 1) % 500 == 0:
                         print("Frame/iteration {} (video {} / {})".format(total_iterations, video_i, len(self.dataset)))
-                if 20 <= video_i:
-                    break
             print("Total number of iterations are {}".format(total_iterations))
 
             print("Starting AVA dataset training")
@@ -353,13 +347,13 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                         new_people = list(filter(lambda p: p.id in old_ids, people.copy()))
 
                         # Filter old Ss
-                        S = tensorify(old_people, True)
-                        S_next = tensorify(new_people, False)
+                        S = _tensorify_people(old_people, True)
+                        S_next = _tensorify_people(new_people, False)
 
                         last_people = people
                     else:
                         frame_time = last_frame_time
-                        S = tensorify(people)
+                        S = _tensorify_people(people)
 
                     if S.shape[0] == 0:
                         continue
@@ -399,7 +393,10 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
                         visualize_counter = 0
                         new_open_windows = set()
                         for index, _ in enumerate(S):
-                            debug_image = get_debug_image(index, S, embedding, out, S_next)
+                            inpS = (S[index, 0].detach()).cpu().to(torch.float).numpy()
+                            outS = (out[index, 0].detach()).cpu().to(torch.float32).numpy()
+                            emb = embedding.detach().cpu().numpy()
+                            debug_image = self._get_ae_from_embedding(index, inpS, emb, outS, S_next)
                             cv2.imshow("person " + str(index), debug_image)
                             new_open_windows.add("person " + str(index))
                             break  # Only show one person
@@ -415,6 +412,34 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
                 print("Finished epoch {} / {}. Loss size:".format(epoch, epochs, epochLoss))
                 self.saveModel(self._modelPath)
+
+    def _get_ae_from_embedding(self, index, S, embedding, out, S_next):
+        S = (S*255).astype(np.uint8)
+        out = (out*255).astype(np.uint8)
+        emb = ((embedding[index] * 0.5 + 1.0) * 255).astype(np.uint8)
+        emb = np.expand_dims(emb, axis=0)
+        emb = np.repeat(emb, repeats=14, axis=0).T
+        emb = np.repeat(emb, repeats=10, axis=0)
+        emb = np.vstack((emb, np.zeros((56 - 5 * 10, 14), dtype=np.uint8)))
+        comparison = np.hstack((S, emb, out))
+        if S_next is not None:
+            Sn = (S_next[index, 0].detach() * 255).cpu().to(torch.uint8).numpy()
+            Sn = np.hstack((np.zeros((56, 56 + 14)), Sn))
+            comparison = np.vstack((comparison, Sn)).astype(np.uint8)
+
+        return cv2.applyColorMap(comparison, cv2.COLORMAP_JET)
+
+    def get_ae_debug(self, people):
+        combined = []
+        for index, person in enumerate(people):
+            embedding = torch.from_numpy(person.pose_vector).to(device)
+            embedding = embedding.reshape((1, embedding.shape[0]))
+            out = self._AE_model.decode(embedding)
+            out = out[0, 0].detach().cpu().to(torch.float32).numpy()
+            emb = embedding.detach().cpu().numpy()
+            image = self._get_ae_from_embedding(0, person.S, emb, out, None)
+            combined.append(image)
+        return combined
 
 
 class Flatten(torch.nn.Module):

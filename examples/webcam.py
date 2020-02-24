@@ -7,12 +7,14 @@ turned on.
 
 import cv2
 import numpy as np
+import time
 
 from DenseSense.algorithms.DensePoseWrapper import DensePoseWrapper
 from DenseSense.algorithms.Sanitizer import Sanitizer
 from DenseSense.algorithms.Tracker import Tracker
 from DenseSense.algorithms.UVMapper import UVMapper
 from DenseSense.algorithms.DescriptionExtractor import DescriptionExtractor
+from DenseSense.algorithms.ActionClassifier import ActionClassifier
 
 
 def white_balance(image):
@@ -26,10 +28,6 @@ def white_balance(image):
 
 
 def main():
-    cam = cv2.VideoCapture(0)
-    frameIndex = 0
-    oldOpenWindows = set()
-
     densepose = DensePoseWrapper()
     sanitizer = Sanitizer()
     sanitizer.loadModel("./models/Sanitizer.pth")
@@ -37,11 +35,20 @@ def main():
     uvMapper = UVMapper()
     descriptionExtractor = DescriptionExtractor()
     descriptionExtractor.loadModel("./models/DescriptionExtractor.pth")
+    actionClassifier = ActionClassifier()
+    actionClassifier.loadModel("./models/ActionClassifier_AutoEncoder.pth")
+
+    cam = cv2.VideoCapture(0)
+    frameIndex = 0
+    frame_time = time.time()
+    oldOpenWindows = set()
 
     while True:
         # Get image from webcam
         return_value, image = cam.read()
         assert return_value, "Failed to read from web camera"
+        delta_time = time.time() - frame_time
+        frame_time = time.time()
 
         # White balance the image to get better color features
         image = white_balance(image)
@@ -71,9 +78,14 @@ def main():
         clothes = descriptionExtractor.extract(peopleMaps)
         clothingImages = descriptionExtractor.getLabelImage()
 
+        # Get pose embedding
+        actionClassifier.extract_ae(people, delta_time)
+        debugACAE = actionClassifier.get_ae_debug(people)
+
         # Per person window management
         newOpenWindows = set()
         for i, person in enumerate(people):
+            # Show UV map and label
             S_ROI = (person.I * (255 / 25)).astype(np.uint8)
             S_ROI = cv2.applyColorMap(S_ROI, cv2.COLORMAP_PARULA)
             S_ROI = cv2.resize(S_ROI, (160, 160))
@@ -87,6 +99,11 @@ def main():
             newOpenWindows.add(windowName)
             cv2.imshow(windowName, personWindow)
             cv2.resizeWindow(windowName, 600, 600)
+
+            # ... and a window for ac ae
+            windowName = "ActionClassifier_AutoEncoder image " + str(person.id)
+            newOpenWindows.add(windowName)
+            cv2.imshow(windowName, cv2.resize(debugACAE[i], (debugACAE[i].shape[1]*3, debugACAE[i].shape[0]*3)))
 
         for oldWindow in oldOpenWindows:
             if oldWindow not in newOpenWindows:
