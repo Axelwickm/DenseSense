@@ -215,7 +215,7 @@ class DescriptionExtractor(DenseSense.algorithms.Algorithm.Algorithm):
 
         self.denseposeExtractor = DensePoseWrapper()
         self.sanitizer = Sanitizer()
-        self.sanitizer.loadModel(topDir+"/models/Sanitizer.pth")
+        self.sanitizer.load_model(topDir + "/models/Sanitizer.pth")
         self.uvMapper = UVMapper()
 
         # PyTorch things

@@ -30,7 +30,7 @@ def white_balance(image):
 def main():
     densepose = DensePoseWrapper()
     sanitizer = Sanitizer()
-    sanitizer.loadModel("./models/Sanitizer.pth")
+    sanitizer.load_model("./models/Sanitizer.pth")
     tracker = Tracker()
     uvMapper = UVMapper()
     descriptionExtractor = DescriptionExtractor()

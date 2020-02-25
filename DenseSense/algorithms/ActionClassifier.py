@@ -93,7 +93,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
         self.denseposeExtractor = DensePoseWrapper()
         self.sanitizer = Sanitizer()
-        self.sanitizer.loadModel(topDir + "/models/Sanitizer.pth")
+        self.sanitizer.load_model(topDir + "/models/Sanitizer.pth")
 
         if datasetName in ActionClassifier.COCO_Datasets:
             print("Loading COCO dataset: "+datasetName)
