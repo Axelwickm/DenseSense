@@ -31,6 +31,9 @@ class YoutubeLoader:
         self.downloader = Process(target=self._download)
         self.downloader.start()
 
+    def __del__(self):
+        self.downloader.terminate()
+
     def queue_video(self, key, start_time, end_time, fps_mean=5, fps_std=2):
         if self.verbose:
             print("Queueing video: {}, {}->{}".format(key, start_time, end_time))
