@@ -1,5 +1,6 @@
 from argparse import ArgumentParser
 import os
+import shutil
 
 parser = ArgumentParser()
 trainable = ["DescriptionExtractor", "Sanitizer", "ActionClassifier"]
@@ -17,15 +18,29 @@ parser.add_argument("--lmdb", help="Whether to use LMDB database or not", defaul
 
 
 def main():
+    # Print args
     args = parser.parse_args()
     for arg in vars(args):
         print("\t", arg, getattr(args, arg))
     print("\n")
 
+    # Determine model path
     modelPath = args.model
     if os.path.isdir(modelPath):
         modelPath = os.path.join(modelPath, args.algorithm+".pth")
     alreadyExists = os.path.exists(modelPath)
+
+    # Determine tensorboard path
+    try:
+        tb = int(args.tensorboard)
+        tb = True if 0 < tb else False
+    except ValueError:
+        tb = args.tensorboard
+
+        # Potentially delete old tensorboard
+        if os.path.isdir("./data/tensorboard/"+tb):
+            print("Deleting old tensorboard: "+tb)
+            shutil.rmtree("./data/tensorboard/"+tb)
 
     if args.algorithm == "DescriptionExtractor":
         from DenseSense.algorithms.DescriptionExtractor import DescriptionExtractor
@@ -39,12 +54,6 @@ def main():
         if args.dataset is not None:
             dataset = args.dataset
 
-        try:
-            tb = int(args.tensorboard)
-            tb = True if 0 < tb else False
-        except ValueError:
-            tb = args.tensorboard
-
         descriptionExtractor.train(epochs=args.epochs, dataset=dataset, learningRate=args.learningRate,
                         useDatabase=args.lmdb, printUpdateEvery=args.print,
                         visualize=args.visualize, tensorboard=tb)
@@ -54,21 +63,15 @@ def main():
         sanitizer = Sanitizer()
         if alreadyExists and not args.override:
             print("Will keep working on existing model")
-            sanitizer.loadModel(modelPath)
-        sanitizer.saveModel(modelPath)
+            sanitizer.load_model(modelPath)
+        sanitizer.save_model(modelPath)
 
         dataset = "val2017"
         if args.dataset is not None:
             dataset = args.dataset
 
-        try:
-            tb = int(args.tensorboard)
-            tb = True if 0 < tb else False
-        except ValueError:
-            tb = args.tensorboard
-
-        sanitizer.train(epochs=args.epochs, dataset=dataset, learningRate=args.learningRate,
-                        useDatabase=args.lmdb, printUpdateEvery=args.print,
+        sanitizer.train(epochs=args.epochs, dataset=dataset, learning_rate=args.learningRate,
+                        use_database=args.lmdb, print_update_every=args.print,
                         visualize=args.visualize, tensorboard=tb)
 
     elif args.algorithm == "ActionClassifier":
@@ -82,12 +85,6 @@ def main():
         dataset = "val2017"
         if args.dataset is not None:
             dataset = args.dataset
-
-        try:
-            tb = int(args.tensorboard)
-            tb = True if 0 < tb else False
-        except ValueError:
-            tb = args.tensorboard
 
         ac.trainAutoEncoder(epochs=args.epochs, dataset=dataset, learningRate=args.learningRate,
                             useLMDB=args.lmdb, printUpdateEvery=args.print,
