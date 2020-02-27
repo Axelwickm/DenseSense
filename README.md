@@ -25,16 +25,21 @@ python -m pip install -r ./DenseSense/requirements.txt
 Install [detectron2](https://github.com/facebookresearch/detectron2) from cloned github repository:
 ```bash
 git clone https://github.com/facebookresearch/detectron2/
+git checkout 94d0f13
 cd detectron2 && python -m pip install -e .
 ```
 
-Add DensePose to the PYTHONPATH by locating it using output of:
+Add the `./projects/Densepose` folder to PYTHONPATH, or alternatively run the following command and move the file `./densepose.pth` to your site-packages or dist-packages: 
 ```bash
-python -c "import detectron2, os; print(os.path.dirname(os.path.dirname(detectron2.__file__))+'/projects/DensePose')"
+echo "import site; site.addsitedir(\""$(python -c "import detectron2, os; print(os.path.dirname(os.path.dirname(detectron2.__file__))+'/projects/DensePose')")"\")" > densepose.pth
 ```
 
-Also add DenseSense to PYTHONPATH.
-<br/><br/>
+Also DenseSense to PYTHONPATH or by adding the following code in `DenseSense.pth` to site-packages or dist-packages: 
+```python
+import site
+site.addsitedir(YOUR_DENSESENSE_DIR)
+```
+<br/>
 
 Get the DensePose model configuration file and put in under ./models. Be sure to also get the BaseConfig:
 https://github.com/facebookresearch/detectron2/tree/master/projects/DensePose/configs
