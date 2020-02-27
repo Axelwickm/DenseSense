@@ -13,7 +13,7 @@ Included are a web cam example which all above features utilized,
 and a training script for regenerating the models which can be trained.
 There are however trained models included under ./models.
 
-![image of person with DenseSense debug output](examples/densesense_example0.jpg)
+![image of person with DenseSense debug output](example0.jpg)
 
 ## To install:
 Install [PyTorch](https://pytorch.org/)
