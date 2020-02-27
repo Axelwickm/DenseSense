@@ -202,8 +202,6 @@ class Sanitizer(DenseSense.algorithms.Algorithm.Algorithm):
                     active = torch.mean(masked[i])
                     if ActiveThreshold < active:
                         newPeople.append(person)
-                    else:
-                        print("Forgot ", active)
 
         # Generate a mask again for the whole person, allowing for a holistic judgement
         self._generate_masks(newPeople)

@@ -22,7 +22,7 @@ if torch.cuda.is_available():
 print("ActionClassifier running on: " + str(device))
 
 
-def _tensorify_people(p, last=False):
+def _tensorify_people(p, last=False): # FIXME: should be static method
     S = torch.Tensor(len(p), 1, 56, 56)
     for j in range(len(p)):
         person = p[j]
@@ -81,7 +81,10 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
             return
 
         # Run prediction
-        embeddings = self._AE_model.encode(S, delta_time)
+        with torch.no_grad():
+            embeddings = self._AE_model.encode(S, delta_time)
+
+        # Add prediction to people
         for i, embedding in enumerate(embeddings):
             people[i].pose_vector = embedding.detach().cpu().numpy()
 
@@ -136,7 +139,7 @@ class ActionClassifier(DenseSense.algorithms.Algorithm.Algorithm):
 
             self.dataset = ordered_data
 
-            self.youtubeLoader = YoutubeLoader(verbose=True)
+            self.youtubeLoader = YoutubeLoader(verbose=False)
             for key, video in self.dataset:
                 self.youtubeLoader.queue_video(key, video[0][0], video[-1][0])
 
