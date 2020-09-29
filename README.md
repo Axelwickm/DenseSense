@@ -29,17 +29,10 @@ git checkout 94d0f13
 cd detectron2 && python -m pip install -e .
 ```
 
-Add the `./projects/Densepose` folder to PYTHONPATH, or alternatively run the following command and move the file `./densepose.pth` to your site-packages or dist-packages: 
+Install DenseSense by running the following in the DenseSense repo:
 ```bash
-echo "import site; site.addsitedir(\""$(python -c "import detectron2, os; print(os.path.dirname(os.path.dirname(detectron2.__file__))+'/projects/DensePose')")"\")" > densepose.pth
+pip install .
 ```
-
-Also DenseSense to PYTHONPATH or by adding the following code in `DenseSense.pth` to site-packages or dist-packages: 
-```python
-import site
-site.addsitedir(YOUR_DENSESENSE_DIR)
-```
-<br/>
 
 Get the DensePose model configuration file and put in under ./models. Be sure to also get the BaseConfig:
 https://github.com/facebookresearch/detectron2/tree/master/projects/DensePose/configs
