@@ -25,7 +25,7 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     license='MIT',
     url="https://github.com/Axelwickm/DenseSense",
-    packages=["DenseSense.algorithms", "DenseSense.utils"],
+    packages=["DenseSense", "DenseSense.algorithms", "DenseSense.utils"],
     install_requires=install_requires,
     classifiers=[
         "Programming Language :: Python :: 3",
