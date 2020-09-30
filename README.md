@@ -9,7 +9,7 @@ This project includes:
 * WIP: a descriptionExtractor which identifies the kind of clothing and what color that people are wearing.
 * WIP: a pose detector which classifies what each person is doing.
 
-Included are a web cam example which all above features utilized, 
+Included are a web cam example which all above features utilized,
 and a training script for regenerating the models which can be trained.
 There are however trained models included under ./models.
 
@@ -18,16 +18,8 @@ There are however trained models included under ./models.
 ## To install:
 Install [PyTorch](https://pytorch.org/)
 
-Install all the dependencies:
-```bash
-python -m pip install -r ./DenseSense/requirements.txt
-```
-Install [detectron2](https://github.com/facebookresearch/detectron2) from cloned github repository:
-```bash
-git clone https://github.com/facebookresearch/detectron2/
-git checkout 94d0f13
-cd detectron2 && python -m pip install -e .
-```
+
+Install [detectron2](https://github.com/facebookresearch/detectron2/blob/master/INSTALL.md)
 
 Install DenseSense by running the following in the DenseSense repo:
 ```bash
@@ -58,4 +50,3 @@ Download (you have to fill out a form) and place data under ./data/DeepFashion2/
 
 ## Example debug output
 TODO
-     
