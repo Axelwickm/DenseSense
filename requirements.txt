@@ -12,6 +12,6 @@ tensorboard
 tensorboardx
 Cython
 pycocotools
-youtube_dl
+youtube-dl
 pafy
 ffmpeg-python
